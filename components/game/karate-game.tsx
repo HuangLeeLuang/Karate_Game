@@ -11,7 +11,7 @@ const GROUND_Y = 620;
 const FPS = 60;
 
 type AttackLevel = 'HIGH' | 'MID' | 'LOW';
-type AttackType = 'PUNCH' | 'KICK';
+type AttackType = 'PUNCH' | 'KICK' | 'GUN';
 type AttackPhase = 'STARTUP' | 'ACTIVE' | 'RECOVERY' | null;
 type GameStatus = 'LOADING' | 'READY' | 'FIGHTING' | 'KO' | 'PAUSED';
 type Direction = -1 | 1;
@@ -32,6 +32,8 @@ interface AttackData {
   blockStunFrames: number;
   knockback: number;
   canTriggerGrapple: boolean;
+  projectile?: boolean;
+  projectileSpeed?: number;
 }
 
 interface AIData {
@@ -84,20 +86,33 @@ interface GrappleState {
   aiChoice: Direction;
 }
 
+interface Projectile {
+  owner: 'player' | 'enemy';
+  x: number;
+  y: number;
+  previousX: number;
+  velocityX: number;
+  lifetime: number;
+  data: AttackData;
+}
+
 interface World {
   player: Fighter;
   enemy: Fighter;
   attacks: AttackData[];
-  attackByInput: Map<string, AttackData>;
+  meleeAttackByInput: Map<string, AttackData>;
+  gunAttackByInput: Map<string, AttackData>;
   ai: AIData;
   stage: HTMLImageElement;
   fighterImage: HTMLImageElement;
   actionSheet: HTMLImageElement;
+  gunSheet: HTMLImageElement;
   status: GameStatus;
   previousStatus: GameStatus;
   keys: Set<string>;
   justPressed: Set<string>;
   grapple: GrappleState | null;
+  projectiles: Projectile[];
   impacts: Impact[];
   banner: Banner | null;
   aiDecisionTimer: number;
@@ -107,13 +122,17 @@ interface World {
   debug: boolean;
   showBoxes: boolean;
   sound: boolean;
+  gunMode: boolean;
+  secretIndex: number;
   audio: AudioContext | null;
   lastTime: number;
   frameHandle: number;
   onStatus: (status: GameStatus) => void;
+  onGunMode: (enabled: boolean) => void;
 }
 
 const levelIndex: Record<AttackLevel, number> = { HIGH: 0, MID: 1, LOW: 2 };
+const secretSequence = ['arrowup', 'arrowup', 'arrowdown', 'arrowdown', 'arrowleft', 'arrowright', 'arrowleft', 'arrowright', 'q', 'w'];
 
 function rectsOverlap(a: Rect, b: Rect) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -291,6 +310,7 @@ class Fighter {
   attackBox(): Rect | null {
     if (!this.attack || this.phase !== 'ACTIVE') return null;
     const { data } = this.attack;
+    if (data.attackType === 'GUN') return null;
     const yMap = {
       HIGH: GROUND_Y - this.yOffset - 278,
       MID: GROUND_Y - this.yOffset - 194,
@@ -365,12 +385,40 @@ function setStatus(world: World, status: GameStatus) {
   world.onStatus(status);
 }
 
+function enableGunMode(world: World) {
+  if (world.gunMode) return;
+  if (!world.audio) world.audio = new AudioContext();
+  world.gunMode = true;
+  world.secretIndex = 0;
+  world.onGunMode(true);
+  world.banner = { text: 'SECRET MODE', subtext: 'Q / A / Z 已切換為三段射擊', color: '#22d3ee', life: 2.4 };
+  playTone(world, 520, 0.08, 0.04);
+  window.setTimeout(() => playTone(world, 680, 0.08, 0.04), 90);
+  window.setTimeout(() => playTone(world, 920, 0.14, 0.05), 180);
+}
+
+function trackSecretInput(world: World, key: string) {
+  if (world.status !== 'READY' || world.gunMode) return;
+  if (key === secretSequence[world.secretIndex]) {
+    world.secretIndex += 1;
+    if (world.secretIndex === secretSequence.length) enableGunMode(world);
+    return;
+  }
+  world.secretIndex = key === secretSequence[0] ? 1 : 0;
+}
+
 function resetWorld(world: World) {
   world.player.reset(350, 1);
   world.enemy.reset(930, -1);
   world.grapple = null;
+  world.projectiles = [];
   world.impacts = [];
-  world.banner = { text: 'ROUND 1', subtext: '距離・高度・時機', color: '#ffe08a', life: 1.2 };
+  world.banner = {
+    text: world.gunMode ? 'SECRET ROUND' : 'ROUND 1',
+    subtext: world.gunMode ? 'Q / A / Z = HIGH / MID / LOW SHOT' : '距離・高度・時機',
+    color: world.gunMode ? '#22d3ee' : '#ffe08a',
+    life: 1.2,
+  };
   world.aiDecisionTimer = 0.45;
   world.aiRetreatTimer = 0;
   world.hitStop = 0;
@@ -507,6 +555,25 @@ function updateAI(world: World, dt: number) {
     enemy.moveIntent = 0;
     return;
   }
+  enemy.crouching = false;
+  const incoming = world.projectiles.find((projectile) =>
+    projectile.owner === 'player' &&
+    Math.abs(projectile.x - enemy.x) < 430 &&
+    Math.sign(projectile.velocityX) === Math.sign(enemy.x - projectile.x),
+  );
+  if (incoming) {
+    if (incoming.data.attackLevel === 'HIGH') {
+      enemy.crouching = true;
+      enemy.moveIntent = 0;
+      return;
+    }
+    if (incoming.data.attackLevel === 'LOW' && enemy.yOffset === 0) {
+      enemy.jump();
+      enemy.moveIntent = 0;
+      return;
+    }
+    enemy.moveIntent = enemy.direction;
+  }
   const distance = Math.abs(enemy.x - player.x);
   world.aiDecisionTimer -= dt;
   world.aiRetreatTimer = Math.max(0, world.aiRetreatTimer - dt);
@@ -545,11 +612,86 @@ function handlePlayer(world: World) {
   if (world.justPressed.has('arrowup')) player.jump();
   for (const input of ['q', 'a', 'z', 'w', 's', 'x']) {
     if (!world.justPressed.has(input)) continue;
-    const attack = world.attackByInput.get(input);
+    const useGun = world.gunMode && ['q', 'a', 'z'].includes(input);
+    const attack = useGun
+      ? world.gunAttackByInput.get(input)
+      : world.meleeAttackByInput.get(input);
     if (attack && player.beginAttack(attack)) {
-      playTone(world, attack.attackType === 'KICK' ? 150 : 240, 0.04, 0.016);
+      playTone(world, attack.attackType === 'GUN' ? 430 : attack.attackType === 'KICK' ? 150 : 240, 0.04, 0.016);
     }
   }
+}
+
+function spawnProjectiles(world: World) {
+  for (const fighter of [world.player, world.enemy]) {
+    const runtime = fighter.attack;
+    if (
+      !runtime ||
+      runtime.hitResolved ||
+      fighter.phase !== 'ACTIVE' ||
+      runtime.data.attackType !== 'GUN' ||
+      !runtime.data.projectile
+    ) continue;
+
+    runtime.hitResolved = true;
+    const yByLevel: Record<AttackLevel, number> = {
+      HIGH: GROUND_Y - fighter.yOffset - 270,
+      MID: GROUND_Y - fighter.yOffset - 120,
+      LOW: GROUND_Y - fighter.yOffset - 54,
+    };
+    const speed = runtime.data.projectileSpeed ?? 1400;
+    const startX = fighter.x + fighter.direction * 96;
+    world.projectiles.push({
+      owner: fighter.id,
+      x: startX,
+      previousX: startX,
+      y: yByLevel[runtime.data.attackLevel],
+      velocityX: speed * fighter.direction,
+      lifetime: Math.min(1, runtime.data.range / speed + 0.12),
+      data: runtime.data,
+    });
+    world.shake = Math.max(world.shake, 4);
+    playTone(world, 96, 0.08, 0.055);
+    playTone(world, 880, 0.045, 0.022);
+  }
+}
+
+function updateProjectiles(world: World, dt: number) {
+  spawnProjectiles(world);
+  for (const projectile of world.projectiles) {
+    projectile.previousX = projectile.x;
+    projectile.x += projectile.velocityX * dt;
+    projectile.lifetime -= dt;
+    const defender = projectile.owner === 'player' ? world.enemy : world.player;
+    const collider: Rect = {
+      x: Math.min(projectile.previousX, projectile.x) - 13,
+      y: projectile.y - 8,
+      w: Math.abs(projectile.x - projectile.previousX) + 26,
+      h: 16,
+    };
+    const target = defender.hurtboxes()[projectile.data.attackLevel];
+    if (!rectsOverlap(collider, target)) continue;
+
+    const direction = Math.sign(projectile.velocityX) as Direction;
+    const guarded = defender.canAutoGuard(projectile.data.attackLevel);
+    defender.receiveHit(projectile.data, direction, false, guarded);
+    projectile.lifetime = -1;
+    world.impacts.push({
+      x: projectile.x,
+      y: projectile.y,
+      life: guarded ? 0.28 : 0.48,
+      color: guarded ? '#7dd3fc' : '#22d3ee',
+    });
+    world.banner = guarded
+      ? { text: 'SHOT BLOCK', color: '#7dd3fc', life: 0.35 }
+      : { text: `${projectile.data.attackLevel} SHOT`, color: '#22d3ee', life: 0.45 };
+    world.hitStop = guarded ? 0.035 : 0.075;
+    world.shake = guarded ? 3 : 8;
+    playTone(world, guarded ? 260 : 110, 0.07, 0.045);
+  }
+  world.projectiles = world.projectiles.filter((projectile) =>
+    projectile.lifetime > 0 && projectile.x > -60 && projectile.x < WIDTH + 60,
+  );
 }
 
 function checkKO(world: World) {
@@ -602,6 +744,7 @@ function updateWorld(world: World, dt: number) {
   updateAI(world, dt);
   world.player.update(dt);
   world.enemy.update(dt);
+  updateProjectiles(world, dt);
 
   world.player.x = clamp(world.player.x, 104, WIDTH - 104);
   world.enemy.x = clamp(world.enemy.x, 104, WIDTH - 104);
@@ -645,6 +788,7 @@ function actionFrameFor(fighter: Fighter) {
   if (!fighter.attack) return 0;
 
   const { data, frame } = fighter.attack;
+  if (data.attackType === 'GUN') return 0;
   const actionFrame = data.attackType === 'PUNCH'
     ? { HIGH: 1, MID: 2, LOW: 3 }[data.attackLevel]
     : { HIGH: 4, MID: 5, LOW: 6 }[data.attackLevel];
@@ -678,18 +822,53 @@ function drawActionFrame(
   );
 }
 
+function gunFrameFor(fighter: Fighter) {
+  if (!fighter.attack || fighter.attack.data.attackType !== 'GUN') return 0;
+  const { data, frame } = fighter.attack;
+  const activeEnd = data.startupFrames + data.activeFrames;
+  const total = activeEnd + data.recoveryFrames;
+  if (frame < data.startupFrames * 0.38 || frame > total - data.recoveryFrames * 0.32) return 0;
+  return { HIGH: 1, MID: 2, LOW: 3 }[data.attackLevel];
+}
+
+function drawGunFrame(
+  ctx: CanvasRenderingContext2D,
+  sheet: HTMLImageElement,
+  frame: number,
+  height: number,
+) {
+  const sourceWidth = sheet.width / 4;
+  const width = height * (sourceWidth / sheet.height);
+  ctx.drawImage(
+    sheet,
+    frame * sourceWidth,
+    0,
+    sourceWidth,
+    sheet.height,
+    -width / 2,
+    -height + 30,
+    width,
+    height,
+  );
+}
+
 function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fighter) {
   const baseY = GROUND_Y - fighter.yOffset;
   const isEnemy = fighter.id === 'enemy';
   const phase = fighter.phase;
   const attack = fighter.attack?.data;
   const frame = actionFrameFor(fighter);
+  const gunFrame = gunFrameFor(fighter);
+  const isHitPose = fighter.state === 'KNOCKDOWN' || fighter.state.startsWith('HIT_');
+  const useGunPose = fighter.id === 'player' && world.gunMode && !isHitPose && (!attack || attack.attackType === 'GUN');
   const attackTotal = attack
     ? attack.startupFrames + attack.activeFrames + attack.recoveryFrames
     : 1;
   const attackProgress = fighter.attack ? clamp(fighter.attack.frame / attackTotal, 0, 1) : 0;
   const actionPulse = attack ? Math.sin(Math.PI * attackProgress) : 0;
-  const activeThrust = attack ? actionPulse * (attack.attackType === 'KICK' ? 42 : 28) : 0;
+  const activeThrust = attack && attack.attackType !== 'GUN'
+    ? actionPulse * (attack.attackType === 'KICK' ? 42 : 28)
+    : 0;
   const clock = world.lastTime / 1000;
   const moving = fighter.state === 'MOVE_FORWARD' || fighter.state === 'MOVE_BACKWARD';
   const bodyBob = fighter.yOffset > 0
@@ -700,7 +879,9 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
   const crouchScale = fighter.crouching ? 0.78 : 1;
   const hitRotation = fighter.state.startsWith('HIT_') ? fighter.direction * 0.12 : 0;
   const knockRotation = fighter.state === 'KNOCKDOWN' ? fighter.direction * 1.18 : hitRotation;
-  const attackRotation = attack ? fighter.direction * actionPulse * (attack.attackType === 'KICK' ? -0.055 : -0.025) : 0;
+  const attackRotation = attack && attack.attackType !== 'GUN'
+    ? fighter.direction * actionPulse * (attack.attackType === 'KICK' ? -0.055 : -0.025)
+    : 0;
   const poseSize = fighter.state === 'KNOCKDOWN' ? 372 : 382;
 
   ctx.save();
@@ -718,7 +899,7 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
   if (isEnemy) ctx.filter = 'sepia(.8) hue-rotate(292deg) saturate(1.8) brightness(.68) contrast(1.08)';
   if (fighter.flash > 0) ctx.filter = 'brightness(2.5) saturate(.2)';
   if (fighter.guardFlash > 0) ctx.filter = 'brightness(1.45) saturate(1.8)';
-  if (frame !== 0 && (phase === 'ACTIVE' || phase === 'RECOVERY')) {
+  if (!useGunPose && frame !== 0 && (phase === 'ACTIVE' || phase === 'RECOVERY')) {
     for (let trail = 3; trail >= 1; trail -= 1) {
       ctx.save();
       ctx.globalAlpha = 0.055 * trail;
@@ -726,7 +907,8 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
       ctx.restore();
     }
   }
-  drawActionFrame(ctx, world.actionSheet, frame, poseSize);
+  if (useGunPose) drawGunFrame(ctx, world.gunSheet, gunFrame, poseSize);
+  else drawActionFrame(ctx, world.actionSheet, frame, poseSize);
   ctx.restore();
 
   if (attack && phase === 'ACTIVE') {
@@ -780,6 +962,39 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
   ctx.fillStyle = stageShade;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
+  for (const projectile of world.projectiles) {
+    ctx.save();
+    const direction = Math.sign(projectile.velocityX);
+    const trailLength = 54;
+    const gradient = ctx.createLinearGradient(
+      projectile.x - direction * trailLength,
+      projectile.y,
+      projectile.x,
+      projectile.y,
+    );
+    gradient.addColorStop(0, 'rgba(34, 211, 238, 0)');
+    gradient.addColorStop(1, '#e0f2fe');
+    ctx.strokeStyle = gradient;
+    ctx.shadowColor = '#22d3ee';
+    ctx.shadowBlur = 18;
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(projectile.x - direction * trailLength, projectile.y);
+    ctx.lineTo(projectile.x, projectile.y);
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.ellipse(projectile.x, projectile.y, 10, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (world.showBoxes) {
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#22d3ee';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(projectile.x - 13, projectile.y - 8, 26, 16);
+    }
+    ctx.restore();
+  }
+
   drawFighter(ctx, world, world.player);
   drawFighter(ctx, world, world.enemy);
 
@@ -829,7 +1044,7 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
   ctx.fillText('NEON KARATE', WIDTH / 2, 47);
   ctx.font = '700 12px ui-monospace, monospace';
   ctx.fillStyle = '#67e8f9';
-  ctx.fillText('CITY DOJO // PROTOTYPE 01', WIDTH / 2, 68);
+  ctx.fillText(world.gunMode ? 'SECRET GUN MODE // ACTIVE' : 'CITY DOJO // PROTOTYPE 02', WIDTH / 2, 68);
 
   if (world.banner) {
     ctx.save();
@@ -857,12 +1072,31 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
     ctx.fillText('NEON KARATE', WIDTH / 2, 285);
     ctx.font = '700 20px ui-monospace, monospace';
     ctx.fillStyle = '#67e8f9';
-    ctx.fillText(world.status === 'LOADING' ? 'LOADING FIGHT DATA…' : '按下開始，進入城市道場', WIDTH / 2, 330);
+    ctx.fillText(
+      world.status === 'LOADING'
+        ? 'LOADING FIGHT DATA…'
+        : world.gunMode
+          ? 'SECRET MODE READY // 按下開始'
+          : '按下開始，進入城市道場',
+      WIDTH / 2,
+      330,
+    );
+    if (world.status === 'READY') {
+      ctx.font = '700 14px ui-monospace, monospace';
+      ctx.fillStyle = world.gunMode ? '#a5f3fc' : 'rgba(226, 232, 240, .62)';
+      ctx.fillText(
+        world.gunMode
+          ? 'Q / A / Z：上・中・下段射擊'
+          : 'CITY RUMOR // ↑ ↑ ↓ ↓ ← → ← → Q W',
+        WIDTH / 2,
+        365,
+      );
+    }
   }
 
   if (world.debug) {
     const distance = Math.round(Math.abs(world.player.x - world.enemy.x));
-    roundedRect(ctx, 20, 132, 310, 224, 14);
+    roundedRect(ctx, 20, 132, 310, 266, 14);
     ctx.fillStyle = 'rgba(2, 6, 23, .84)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(103, 232, 249, .4)';
@@ -877,6 +1111,8 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
       `E PHASE ${world.enemy.phase ?? '—'}`,
       `LEVEL   ${world.player.attack?.data.attackLevel ?? '—'}`,
       `GRAPPLE ${world.grapple ? `${Math.max(0, world.grapple.timer).toFixed(2)}s` : 'OFF'}`,
+      `GUN     ${world.gunMode ? 'ON' : 'OFF'}`,
+      `BULLETS ${world.projectiles.length}`,
       `BOXES   ${world.showBoxes ? 'ON' : 'OFF'}`,
     ];
     ctx.font = '700 14px ui-monospace, monospace';
@@ -885,10 +1121,19 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
   }
 }
 
-const keyLabels = [
+const meleeKeyLabels = [
   { input: 'Q', label: '上拳', tone: 'punch' },
   { input: 'A', label: '中拳', tone: 'punch' },
   { input: 'Z', label: '下拳', tone: 'punch' },
+  { input: 'W', label: '上踢', tone: 'kick' },
+  { input: 'S', label: '中踢', tone: 'kick' },
+  { input: 'X', label: '下踢', tone: 'kick' },
+] as const;
+
+const gunKeyLabels = [
+  { input: 'Q', label: '上射', tone: 'shot' },
+  { input: 'A', label: '中射', tone: 'shot' },
+  { input: 'Z', label: '下射', tone: 'shot' },
   { input: 'W', label: '上踢', tone: 'kick' },
   { input: 'S', label: '中踢', tone: 'kick' },
   { input: 'X', label: '下踢', tone: 'kick' },
@@ -901,6 +1146,8 @@ export function KarateGame() {
   const [debug, setDebug] = useState(false);
   const [showBoxes, setShowBoxes] = useState(false);
   const [sound, setSound] = useState(true);
+  const [gunMode, setGunMode] = useState(false);
+  const activeKeyLabels = gunMode ? gunKeyLabels : meleeKeyLabels;
 
   useEffect(() => {
     let cancelled = false;
@@ -911,12 +1158,13 @@ export function KarateGame() {
     const renderContext = context;
 
     async function boot() {
-      const [attacksResponse, aiResponse, stage, fighterImage, actionSheet] = await Promise.all([
+      const [attacksResponse, aiResponse, stage, fighterImage, actionSheet, gunSheet] = await Promise.all([
         fetch('/game-data/attacks.json'),
         fetch('/game-data/ai.json'),
         loadImage('/urban-stage.png'),
         loadImage('/fio-fighter.png'),
         loadImage('/fio-actions-v2.png'),
+        loadImage('/fio-gun-actions-v1.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
       const ai = (await aiResponse.json()) as AIData;
@@ -925,16 +1173,27 @@ export function KarateGame() {
         player: new Fighter('player', 'FIO // 白閃', 350, 1),
         enemy: new Fighter('enemy', ai.name, 930, -1),
         attacks,
-        attackByInput: new Map(attacks.map((attack) => [attack.input.toLowerCase(), attack])),
+        meleeAttackByInput: new Map(
+          attacks
+            .filter((attack) => attack.attackType !== 'GUN')
+            .map((attack) => [attack.input.toLowerCase(), attack]),
+        ),
+        gunAttackByInput: new Map(
+          attacks
+            .filter((attack) => attack.attackType === 'GUN')
+            .map((attack) => [attack.input.toLowerCase(), attack]),
+        ),
         ai,
         stage,
         fighterImage,
         actionSheet,
+        gunSheet,
         status: 'READY',
         previousStatus: 'READY',
         keys: new Set(),
         justPressed: new Set(),
         grapple: null,
+        projectiles: [],
         impacts: [],
         banner: null,
         aiDecisionTimer: 0,
@@ -944,10 +1203,13 @@ export function KarateGame() {
         debug: false,
         showBoxes: false,
         sound: true,
+        gunMode: false,
+        secretIndex: 0,
         audio: null,
         lastTime: performance.now(),
         frameHandle: 0,
         onStatus: setReactStatus,
+        onGunMode: setGunMode,
       };
       worldRef.current = world;
       setReactStatus('READY');
@@ -977,7 +1239,10 @@ export function KarateGame() {
       const key = event.key.toLowerCase();
       const gameKeys = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'q', 'a', 'z', 'w', 's', 'x'];
       if (gameKeys.includes(key)) event.preventDefault();
-      if (!world.keys.has(key)) world.justPressed.add(key);
+      if (!world.keys.has(key)) {
+        world.justPressed.add(key);
+        trackSecretInput(world, key);
+      }
       world.keys.add(key);
       if (key === 'enter' && world.status === 'READY') resetWorld(world);
       if (key === 'r') resetWorld(world);
@@ -1022,7 +1287,10 @@ export function KarateGame() {
   const press = useCallback((key: string) => {
     const world = worldRef.current;
     if (!world) return;
-    if (!world.keys.has(key)) world.justPressed.add(key);
+    if (!world.keys.has(key)) {
+      world.justPressed.add(key);
+      trackSecretInput(world, key);
+    }
     world.keys.add(key);
   }, []);
 
@@ -1065,11 +1333,16 @@ export function KarateGame() {
       <header className="flex flex-col gap-3 border-b border-cyan-300/15 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.28em] text-cyan-300/75">
-            Prototype 01 · Modern Urban Karate
+            Prototype 02 · Modern Urban Karate
           </p>
           <h1 className="mt-1 text-2xl font-black tracking-[-0.04em] text-slate-50 sm:text-4xl">
             NEON KARATE <span className="text-cyan-300">// 城市道場</span>
           </h1>
+          {gunMode && (
+            <p className="mt-2 inline-flex rounded-full border border-cyan-300/35 bg-cyan-300/10 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.2em] text-cyan-200">
+              Secret Gun Mode Active
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -1125,12 +1398,16 @@ export function KarateGame() {
 
         <div className="hidden items-center px-5 text-center lg:flex">
           <p className="max-w-48 font-mono text-[11px] leading-5 text-slate-400">
-            拳快而短 · 踢慢而遠<br />站立防上中 · 蹲下防中下<br />同時出拳可進入擒拿
+            {gunMode ? (
+              <>射擊覆蓋遠距 · 踢擊仍保留<br />高射可蹲避 · 低射可跳避<br />射擊後有明確破綻</>
+            ) : (
+              <>拳快而短 · 踢慢而遠<br />站立防上中 · 蹲下防中下<br />同時出拳可進入擒拿</>
+            )}
           </p>
         </div>
 
         <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-white/[.035] p-3">
-          {keyLabels.map(({ input, label, tone }) => (
+          {activeKeyLabels.map(({ input, label, tone }) => (
             <button
               key={input}
               className={`attack-button ${tone}`}
@@ -1145,8 +1422,8 @@ export function KarateGame() {
       </div>
 
       <footer className="flex flex-wrap items-center justify-between gap-2 px-1 font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500">
-        <p>鍵盤：方向鍵移動 · Q/A/Z 拳 · W/S/X 踢</p>
-        <p>D Debug · H Hitbox · P 暫停 · R 重開</p>
+        <p>{gunMode ? 'SECRET：Q/A/Z 射擊 · W/S/X 踢' : '鍵盤：方向鍵移動 · Q/A/Z 拳 · W/S/X 踢'}</p>
+        <p>{gunMode ? 'Projectile ON · D Debug · H Collider' : '密技：↑ ↑ ↓ ↓ ← → ← → Q W · D Debug · H Hitbox'}</p>
       </footer>
     </section>
   );
