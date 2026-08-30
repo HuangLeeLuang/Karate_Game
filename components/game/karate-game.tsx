@@ -92,6 +92,7 @@ interface World {
   ai: AIData;
   stage: HTMLImageElement;
   fighterImage: HTMLImageElement;
+  actionSheet: HTMLImageElement;
   status: GameStatus;
   previousStatus: GameStatus;
   keys: Set<string>;
@@ -638,14 +639,69 @@ function drawBar(
   ctx.fill();
 }
 
+function actionFrameFor(fighter: Fighter) {
+  if (fighter.state === 'KNOCKDOWN' || fighter.state.startsWith('HIT_')) return 7;
+  if (fighter.state === 'THROW') return 2;
+  if (!fighter.attack) return 0;
+
+  const { data, frame } = fighter.attack;
+  const actionFrame = data.attackType === 'PUNCH'
+    ? { HIGH: 1, MID: 2, LOW: 3 }[data.attackLevel]
+    : { HIGH: 4, MID: 5, LOW: 6 }[data.attackLevel];
+  const activeEnd = data.startupFrames + data.activeFrames;
+  const total = activeEnd + data.recoveryFrames;
+  if (frame < data.startupFrames * 0.42 || frame > total - data.recoveryFrames * 0.36) return 0;
+  return actionFrame;
+}
+
+function drawActionFrame(
+  ctx: CanvasRenderingContext2D,
+  sheet: HTMLImageElement,
+  frame: number,
+  size: number,
+  xOffset = 0,
+) {
+  const sourceWidth = sheet.width / 4;
+  const sourceHeight = sheet.height / 2;
+  const column = frame % 4;
+  const row = Math.floor(frame / 4);
+  ctx.drawImage(
+    sheet,
+    column * sourceWidth,
+    row * sourceHeight,
+    sourceWidth,
+    sourceHeight,
+    -size / 2 + xOffset,
+    -size,
+    size,
+    size,
+  );
+}
+
 function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fighter) {
   const baseY = GROUND_Y - fighter.yOffset;
   const isEnemy = fighter.id === 'enemy';
   const phase = fighter.phase;
   const attack = fighter.attack?.data;
-  const activeThrust = phase === 'ACTIVE' ? (attack?.attackType === 'KICK' ? 28 : 18) : 0;
+  const frame = actionFrameFor(fighter);
+  const attackTotal = attack
+    ? attack.startupFrames + attack.activeFrames + attack.recoveryFrames
+    : 1;
+  const attackProgress = fighter.attack ? clamp(fighter.attack.frame / attackTotal, 0, 1) : 0;
+  const actionPulse = attack ? Math.sin(Math.PI * attackProgress) : 0;
+  const activeThrust = attack ? actionPulse * (attack.attackType === 'KICK' ? 42 : 28) : 0;
+  const clock = world.lastTime / 1000;
+  const moving = fighter.state === 'MOVE_FORWARD' || fighter.state === 'MOVE_BACKWARD';
+  const bodyBob = fighter.yOffset > 0
+    ? 0
+    : moving
+      ? Math.sin(clock * 15 + (isEnemy ? 1.7 : 0)) * 6
+      : Math.sin(clock * 3.4 + (isEnemy ? 1.2 : 0)) * 2;
   const crouchScale = fighter.crouching ? 0.78 : 1;
-  const knockRotation = fighter.state === 'KNOCKDOWN' ? fighter.direction * 1.25 : 0;
+  const hitRotation = fighter.state.startsWith('HIT_') ? fighter.direction * 0.12 : 0;
+  const knockRotation = fighter.state === 'KNOCKDOWN' ? fighter.direction * 1.18 : hitRotation;
+  const attackRotation = attack ? fighter.direction * actionPulse * (attack.attackType === 'KICK' ? -0.055 : -0.025) : 0;
+  const poseSize = fighter.state === 'KNOCKDOWN' ? 372 : 382;
 
   ctx.save();
   ctx.globalAlpha = 0.38;
@@ -656,15 +712,21 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
   ctx.restore();
 
   ctx.save();
-  ctx.translate(fighter.x + fighter.direction * activeThrust, baseY);
-  ctx.rotate(knockRotation);
-  ctx.scale(fighter.direction, crouchScale);
+  ctx.translate(fighter.x + fighter.direction * activeThrust, baseY + bodyBob);
+  ctx.rotate(knockRotation + attackRotation);
+  ctx.scale(fighter.direction * (1 + actionPulse * 0.035), crouchScale * (1 - actionPulse * 0.025));
   if (isEnemy) ctx.filter = 'sepia(.8) hue-rotate(292deg) saturate(1.8) brightness(.68) contrast(1.08)';
   if (fighter.flash > 0) ctx.filter = 'brightness(2.5) saturate(.2)';
   if (fighter.guardFlash > 0) ctx.filter = 'brightness(1.45) saturate(1.8)';
-  const width = 242;
-  const height = 363;
-  ctx.drawImage(world.fighterImage, -width / 2, -height, width, height);
+  if (frame !== 0 && (phase === 'ACTIVE' || phase === 'RECOVERY')) {
+    for (let trail = 3; trail >= 1; trail -= 1) {
+      ctx.save();
+      ctx.globalAlpha = 0.055 * trail;
+      drawActionFrame(ctx, world.actionSheet, frame, poseSize, -trail * 18);
+      ctx.restore();
+    }
+  }
+  drawActionFrame(ctx, world.actionSheet, frame, poseSize);
   ctx.restore();
 
   if (attack && phase === 'ACTIVE') {
@@ -849,11 +911,12 @@ export function KarateGame() {
     const renderContext = context;
 
     async function boot() {
-      const [attacksResponse, aiResponse, stage, fighterImage] = await Promise.all([
+      const [attacksResponse, aiResponse, stage, fighterImage, actionSheet] = await Promise.all([
         fetch('/game-data/attacks.json'),
         fetch('/game-data/ai.json'),
         loadImage('/urban-stage.png'),
         loadImage('/fio-fighter.png'),
+        loadImage('/fio-actions-v2.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
       const ai = (await aiResponse.json()) as AIData;
@@ -866,6 +929,7 @@ export function KarateGame() {
         ai,
         stage,
         fighterImage,
+        actionSheet,
         status: 'READY',
         previousStatus: 'READY',
         keys: new Set(),
