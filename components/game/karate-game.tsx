@@ -102,6 +102,13 @@ interface Projectile {
   data: AttackData;
 }
 
+interface MatchView {
+  playerRounds: number;
+  enemyRounds: number;
+  roundNumber: number;
+  matchOver: boolean;
+}
+
 interface World {
   player: Fighter;
   enemy: Fighter;
@@ -125,6 +132,11 @@ interface World {
   banner: Banner | null;
   aiDecisionTimer: number;
   aiRetreatTimer: number;
+  playerRounds: number;
+  enemyRounds: number;
+  roundNumber: number;
+  roundResolved: boolean;
+  matchOver: boolean;
   hitStop: number;
   shake: number;
   debug: boolean;
@@ -138,6 +150,7 @@ interface World {
   onStatus: (status: GameStatus) => void;
   onGunMode: (enabled: boolean) => void;
   onAIChange: (index: number) => void;
+  onMatchChange: (match: MatchView) => void;
 }
 
 const levelIndex: Record<AttackLevel, number> = { HIGH: 0, MID: 1, LOW: 2 };
@@ -416,15 +429,35 @@ function trackSecretInput(world: World, key: string) {
   world.secretIndex = key === secretSequence[0] ? 1 : 0;
 }
 
-function resetWorld(world: World) {
+function emitMatch(world: World) {
+  world.onMatchChange({
+    playerRounds: world.playerRounds,
+    enemyRounds: world.enemyRounds,
+    roundNumber: world.roundNumber,
+    matchOver: world.matchOver,
+  });
+}
+
+function resetWorld(world: World, resetMatch = false) {
+  if (resetMatch) {
+    world.playerRounds = 0;
+    world.enemyRounds = 0;
+    world.roundNumber = 1;
+    world.matchOver = false;
+  } else if (world.roundResolved) {
+    world.roundNumber += 1;
+  }
+  world.roundResolved = false;
   world.player.reset(350, 1);
   world.enemy.reset(930, -1);
   world.grapple = null;
   world.projectiles = [];
   world.impacts = [];
   world.banner = {
-    text: world.gunMode ? 'SECRET ROUND' : 'ROUND 1',
-    subtext: world.gunMode ? 'Q / A / Z = HIGH / MID / LOW SHOT' : world.ai.archetype,
+    text: world.gunMode ? `SECRET ROUND ${world.roundNumber}` : `ROUND ${world.roundNumber}`,
+    subtext: world.gunMode
+      ? `Q / A / Z = SHOT // ${world.playerRounds}–${world.enemyRounds}`
+      : `${world.ai.archetype} // FIRST TO 2`,
     color: world.gunMode ? '#22d3ee' : '#ffe08a',
     life: 1.2,
   };
@@ -434,6 +467,7 @@ function resetWorld(world: World) {
   world.shake = 0;
   world.keys.clear();
   world.justPressed.clear();
+  emitMatch(world);
   setStatus(world, 'FIGHTING');
   playTone(world, 420, 0.12, 0.035);
 }
@@ -452,7 +486,13 @@ function selectAI(world: World, index: number) {
   world.impacts = [];
   world.banner = null;
   world.secretIndex = 0;
+  world.playerRounds = 0;
+  world.enemyRounds = 0;
+  world.roundNumber = 1;
+  world.roundResolved = false;
+  world.matchOver = false;
   world.onAIChange(nextIndex);
+  emitMatch(world);
   setStatus(world, 'READY');
   playTone(world, 320 + nextIndex * 90, 0.08, 0.025);
 }
@@ -779,17 +819,30 @@ function updateProjectiles(world: World, dt: number) {
 }
 
 function checkKO(world: World) {
-  if (world.player.hp > 0 && world.enemy.hp > 0) return;
+  if (world.roundResolved || (world.player.hp > 0 && world.enemy.hp > 0)) return;
   const playerWon = world.enemy.hp <= 0;
   const loser = playerWon ? world.enemy : world.player;
+  world.roundResolved = true;
+  if (playerWon) world.playerRounds += 1;
+  else world.enemyRounds += 1;
+  world.matchOver = world.playerRounds >= 2 || world.enemyRounds >= 2;
   loser.state = 'KNOCKDOWN';
   loser.stunFrames = 9999;
   world.banner = {
-    text: playerWon ? 'K.O. // YOU WIN' : 'K.O. // DEFEAT',
-    subtext: '按 R 或點擊重新開始',
+    text: world.matchOver
+      ? playerWon
+        ? 'MATCH WON'
+        : 'MATCH LOST'
+      : playerWon
+        ? `ROUND ${world.roundNumber} WON`
+        : `ROUND ${world.roundNumber} LOST`,
+    subtext: world.matchOver
+      ? `FINAL ${world.playerRounds}–${world.enemyRounds} // 按 R 再戰`
+      : `SCORE ${world.playerRounds}–${world.enemyRounds} // 按 R 下一回合`,
     color: playerWon ? '#67e8f9' : '#fb7185',
     life: 999,
   };
+  emitMatch(world);
   setStatus(world, 'KO');
   world.hitStop = 0.16;
   world.shake = 14;
@@ -1128,7 +1181,12 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
   ctx.fillText('NEON KARATE', WIDTH / 2, 47);
   ctx.font = '700 12px ui-monospace, monospace';
   ctx.fillStyle = '#67e8f9';
-  ctx.fillText(world.gunMode ? 'SECRET GUN MODE // ACTIVE' : 'CITY DOJO // PROTOTYPE 03', WIDTH / 2, 68);
+  ctx.fillText(world.gunMode ? 'SECRET GUN MODE // ACTIVE' : 'CITY DOJO // PROTOTYPE 04', WIDTH / 2, 68);
+  const playerRoundMarks = `${'◆'.repeat(world.playerRounds)}${'◇'.repeat(2 - world.playerRounds)}`;
+  const enemyRoundMarks = `${'◆'.repeat(world.enemyRounds)}${'◇'.repeat(2 - world.enemyRounds)}`;
+  ctx.font = '900 13px ui-monospace, monospace';
+  ctx.fillStyle = 'rgba(226, 232, 240, .86)';
+  ctx.fillText(`${playerRoundMarks}   ROUND ${world.roundNumber}   ${enemyRoundMarks}`, WIDTH / 2, 96);
 
   if (world.banner) {
     ctx.save();
@@ -1161,32 +1219,34 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
         ? 'LOADING FIGHT DATA…'
         : world.gunMode
           ? 'SECRET MODE READY // 按下開始'
-          : '按下開始，進入城市道場',
+          : '按下開始，進入三戰兩勝',
       WIDTH / 2,
       330,
     );
     if (world.status === 'READY') {
       ctx.font = '700 14px ui-monospace, monospace';
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillText('BEST OF 3 // FIRST TO TWO ROUNDS', WIDTH / 2, 365);
       ctx.fillStyle = world.gunMode ? '#a5f3fc' : 'rgba(226, 232, 240, .62)';
       ctx.fillText(
         world.gunMode
           ? 'Q / A / Z：上・中・下段射擊'
           : 'CITY RUMOR // ↑ ↑ ↓ ↓ ← → ← → Q W',
         WIDTH / 2,
-        365,
+        392,
       );
       ctx.font = '900 20px ui-sans-serif, system-ui';
       ctx.fillStyle = world.ai.accent;
-      ctx.fillText(`${world.ai.name} // ${world.ai.archetype}`, WIDTH / 2, 414);
+      ctx.fillText(`${world.ai.name} // ${world.ai.archetype}`, WIDTH / 2, 435);
       ctx.font = '700 14px ui-monospace, monospace';
       ctx.fillStyle = 'rgba(226, 232, 240, .72)';
-      ctx.fillText(world.ai.description, WIDTH / 2, 443);
+      ctx.fillText(world.ai.description, WIDTH / 2, 464);
     }
   }
 
   if (world.debug) {
     const distance = Math.round(Math.abs(world.player.x - world.enemy.x));
-    roundedRect(ctx, 20, 132, 322, 304, 14);
+    roundedRect(ctx, 20, 132, 322, 342, 14);
     ctx.fillStyle = 'rgba(2, 6, 23, .84)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(103, 232, 249, .4)';
@@ -1194,6 +1254,8 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
     const lines = [
       `AI      ${world.ai.id}`,
       `AI ZONE ${world.ai.preferredMinRange}–${world.ai.preferredMaxRange}px`,
+      `ROUND   ${world.roundNumber}  SCORE ${world.playerRounds}–${world.enemyRounds}`,
+      `MATCH   ${world.matchOver ? 'OVER' : 'LIVE'}`,
       `PLAYER  ${world.player.state}`,
       `ENEMY   ${world.enemy.state}`,
       `DIST    ${distance}px`,
@@ -1242,8 +1304,22 @@ export function KarateGame() {
   const [gunMode, setGunMode] = useState(false);
   const [opponents, setOpponents] = useState<AIData[]>([]);
   const [activeOpponentIndex, setActiveOpponentIndex] = useState(0);
+  const [matchView, setMatchView] = useState<MatchView>({
+    playerRounds: 0,
+    enemyRounds: 0,
+    roundNumber: 1,
+    matchOver: false,
+  });
   const activeKeyLabels = gunMode ? gunKeyLabels : meleeKeyLabels;
   const activeOpponent = opponents[activeOpponentIndex];
+  const startLabel =
+    status === 'FIGHTING' || status === 'PAUSED'
+      ? '重新對戰'
+      : status === 'KO'
+        ? matchView.matchOver
+          ? '再戰一場'
+          : '下一回合'
+        : '開始三戰兩勝';
 
   useEffect(() => {
     let cancelled = false;
@@ -1299,6 +1375,11 @@ export function KarateGame() {
         banner: null,
         aiDecisionTimer: 0,
         aiRetreatTimer: 0,
+        playerRounds: 0,
+        enemyRounds: 0,
+        roundNumber: 1,
+        roundResolved: false,
+        matchOver: false,
         hitStop: 0,
         shake: 0,
         debug: false,
@@ -1312,10 +1393,12 @@ export function KarateGame() {
         onStatus: setReactStatus,
         onGunMode: setGunMode,
         onAIChange: setActiveOpponentIndex,
+        onMatchChange: setMatchView,
       };
       worldRef.current = world;
       setOpponents(ais);
       setActiveOpponentIndex(0);
+      setMatchView({ playerRounds: 0, enemyRounds: 0, roundNumber: 1, matchOver: false });
       setReactStatus('READY');
 
       const loop = (time: number) => {
@@ -1349,8 +1432,8 @@ export function KarateGame() {
       }
       world.keys.add(key);
       if (['1', '2', '3'].includes(key)) selectAI(world, Number(key) - 1);
-      if (key === 'enter' && world.status === 'READY') resetWorld(world);
-      if (key === 'r') resetWorld(world);
+      if (key === 'enter' && world.status === 'READY') resetWorld(world, true);
+      if (key === 'r') resetWorld(world, world.status !== 'KO' || world.matchOver);
       if (key === 'p' && world.status === 'FIGHTING') {
         world.previousStatus = world.status;
         setStatus(world, 'PAUSED');
@@ -1385,7 +1468,7 @@ export function KarateGame() {
     const world = worldRef.current;
     if (!world) return;
     ensureAudio();
-    resetWorld(world);
+    resetWorld(world, world.status !== 'KO' || world.matchOver);
     canvasRef.current?.focus();
   }, [ensureAudio]);
 
@@ -1445,16 +1528,19 @@ export function KarateGame() {
       <header className="flex flex-col gap-3 border-b border-cyan-300/15 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.28em] text-cyan-300/75">
-            Prototype 03 · Rival Personalities
+            Prototype 04 · Best of Three
           </p>
           <h1 className="mt-1 text-2xl font-black tracking-[-0.04em] text-slate-50 sm:text-4xl">
             NEON KARATE <span className="text-cyan-300">// 城市道場</span>
           </h1>
           {gunMode && (
-            <p className="mt-2 inline-flex rounded-full border border-cyan-300/35 bg-cyan-300/10 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.2em] text-cyan-200">
+            <p className="mr-2 mt-2 inline-flex rounded-full border border-cyan-300/35 bg-cyan-300/10 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.2em] text-cyan-200">
               Secret Gun Mode Active
             </p>
           )}
+          <p className="mt-2 inline-flex rounded-full border border-white/10 bg-white/[.04] px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-slate-300">
+            Best of 3 · Fio {matchView.playerRounds}–{matchView.enemyRounds} Rival · Round {matchView.roundNumber}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -1462,8 +1548,8 @@ export function KarateGame() {
             size="lg"
             className="border border-cyan-300/35 bg-cyan-300 text-slate-950 shadow-[0_0_28px_rgba(34,211,238,.22)] hover:bg-cyan-200"
           >
-            {status === 'FIGHTING' ? <RotateCcw /> : <Play />}
-            {status === 'FIGHTING' ? '重新開局' : '開始對戰'}
+            {status === 'FIGHTING' || status === 'PAUSED' ? <RotateCcw /> : <Play />}
+            {startLabel}
           </Button>
           <Button onClick={toggleDebug} variant="outline" size="lg" aria-pressed={debug}>
             <Bug /> Debug
@@ -1560,8 +1646,8 @@ export function KarateGame() {
       </div>
 
       <footer className="flex flex-wrap items-center justify-between gap-2 px-1 font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500">
-        <p>{gunMode ? 'SECRET：Q/A/Z 射擊 · W/S/X 踢' : `1/2/3 選對手 · ${activeOpponent?.archetype ?? '載入對手中'}`}</p>
-        <p>{gunMode ? 'Projectile ON · D Debug · H Collider' : '方向鍵移動 · Q/A/Z 拳 · W/S/X 踢 · D Debug · H Hitbox'}</p>
+        <p>{gunMode ? 'SECRET：Q/A/Z 射擊 · W/S/X 踢' : `三戰兩勝 · 1/2/3 選對手 · ${activeOpponent?.archetype ?? '載入對手中'}`}</p>
+        <p>{gunMode ? 'Projectile ON · R Next Round · D Debug · H Collider' : '方向鍵移動 · Q/A/Z 拳 · W/S/X 踢 · R 下一回合'}</p>
       </footer>
     </section>
   );
