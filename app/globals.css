@@ -1,0 +1,199 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+body {
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+:root {
+  --background: oklch(0.105 0.027 252);
+  --foreground: oklch(0.965 0.014 228);
+  --card: oklch(0.16 0.035 251);
+  --card-foreground: oklch(0.965 0.014 228);
+  --popover: oklch(0.145 0.032 251);
+  --popover-foreground: oklch(0.965 0.014 228);
+  --primary: oklch(0.86 0.14 195);
+  --primary-foreground: oklch(0.13 0.03 251);
+  --secondary: oklch(0.22 0.04 252);
+  --secondary-foreground: oklch(0.93 0.02 220);
+  --muted: oklch(0.19 0.035 252);
+  --muted-foreground: oklch(0.68 0.035 233);
+  --accent: oklch(0.72 0.18 20);
+  --accent-foreground: oklch(0.98 0.01 20);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.37 0.045 238 / 45%);
+  --input: oklch(0.25 0.04 248);
+  --ring: oklch(0.82 0.13 195);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.75rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    min-width: 320px;
+    background:
+      radial-gradient(circle at 12% -8%, rgba(34, 211, 238, .12), transparent 30rem),
+      radial-gradient(circle at 88% 12%, rgba(244, 63, 94, .1), transparent 28rem),
+      linear-gradient(180deg, #07101f 0%, #030712 70%);
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+button {
+  touch-action: manipulation;
+}
+
+.control-button,
+.attack-button {
+  min-height: 3.15rem;
+  border: 1px solid rgba(148, 163, 184, .18);
+  border-radius: .8rem;
+  background: rgba(15, 23, 42, .84);
+  color: #e2e8f0;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .035);
+  transition: transform .12s ease, border-color .12s ease, background .12s ease;
+  user-select: none;
+}
+
+.control-button:hover,
+.control-button:active {
+  border-color: rgba(103, 232, 249, .55);
+  background: rgba(8, 145, 178, .18);
+}
+
+.attack-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .45rem;
+  padding: .55rem .65rem;
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+.attack-button kbd {
+  display: grid;
+  min-width: 1.55rem;
+  height: 1.55rem;
+  place-items: center;
+  border-radius: .42rem;
+  background: rgba(255, 255, 255, .09);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: .7rem;
+}
+
+.attack-button.punch:hover,
+.attack-button.punch:active {
+  border-color: rgba(251, 191, 36, .62);
+  background: rgba(180, 83, 9, .18);
+}
+
+.attack-button.kick:hover,
+.attack-button.kick:active {
+  border-color: rgba(251, 113, 133, .62);
+  background: rgba(190, 24, 93, .17);
+}
+
+.control-button:active,
+.attack-button:active {
+  transform: translateY(2px) scale(.985);
+}

@@ -1,0 +1,14 @@
+{
+  "name": "都市道場挑戰者",
+  "aggression": 0.68,
+  "defense": 0.42,
+  "counterRate": 0.52,
+  "grappleRate": 0.7,
+  "highAttackRate": 0.27,
+  "midAttackRate": 0.46,
+  "lowAttackRate": 0.27,
+  "punchRate": 0.6,
+  "kickRate": 0.4,
+  "retreatRate": 0.28,
+  "reactionFrames": 18
+}
