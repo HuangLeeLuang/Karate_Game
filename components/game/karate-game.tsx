@@ -37,7 +37,13 @@ interface AttackData {
 }
 
 interface AIData {
+  id: string;
   name: string;
+  archetype: string;
+  description: string;
+  accent: string;
+  preferredMinRange: number;
+  preferredMaxRange: number;
   aggression: number;
   defense: number;
   counterRate: number;
@@ -102,7 +108,9 @@ interface World {
   attacks: AttackData[];
   meleeAttackByInput: Map<string, AttackData>;
   gunAttackByInput: Map<string, AttackData>;
+  ais: AIData[];
   ai: AIData;
+  aiIndex: number;
   stage: HTMLImageElement;
   fighterImage: HTMLImageElement;
   actionSheet: HTMLImageElement;
@@ -129,6 +137,7 @@ interface World {
   frameHandle: number;
   onStatus: (status: GameStatus) => void;
   onGunMode: (enabled: boolean) => void;
+  onAIChange: (index: number) => void;
 }
 
 const levelIndex: Record<AttackLevel, number> = { HIGH: 0, MID: 1, LOW: 2 };
@@ -415,7 +424,7 @@ function resetWorld(world: World) {
   world.impacts = [];
   world.banner = {
     text: world.gunMode ? 'SECRET ROUND' : 'ROUND 1',
-    subtext: world.gunMode ? 'Q / A / Z = HIGH / MID / LOW SHOT' : '距離・高度・時機',
+    subtext: world.gunMode ? 'Q / A / Z = HIGH / MID / LOW SHOT' : world.ai.archetype,
     color: world.gunMode ? '#22d3ee' : '#ffe08a',
     life: 1.2,
   };
@@ -427,6 +436,25 @@ function resetWorld(world: World) {
   world.justPressed.clear();
   setStatus(world, 'FIGHTING');
   playTone(world, 420, 0.12, 0.035);
+}
+
+function selectAI(world: World, index: number) {
+  if (world.status === 'FIGHTING' || world.status === 'PAUSED') return;
+  const nextIndex = clamp(index, 0, world.ais.length - 1);
+  const nextAI = world.ais[nextIndex];
+  if (!nextAI) return;
+  world.aiIndex = nextIndex;
+  world.ai = nextAI;
+  world.player.reset(350, 1);
+  world.enemy.reset(930, -1);
+  world.grapple = null;
+  world.projectiles = [];
+  world.impacts = [];
+  world.banner = null;
+  world.secretIndex = 0;
+  world.onAIChange(nextIndex);
+  setStatus(world, 'READY');
+  playTone(world, 320 + nextIndex * 90, 0.08, 0.025);
 }
 
 function beginGrapple(world: World) {
@@ -534,7 +562,27 @@ function resolveAttack(world: World, attacker: Fighter, defender: Fighter) {
 
 function chooseAIAttack(world: World, distance: number) {
   const ai = world.ai;
-  const wantsKick = distance > 118 || Math.random() < ai.kickRate;
+  const playerAttack = world.player.attack?.data;
+  if (
+    playerAttack?.attackType === 'PUNCH' &&
+    (world.player.phase === 'STARTUP' || world.player.phase === 'ACTIVE') &&
+    distance < 132 &&
+    Math.random() < ai.grappleRate
+  ) {
+    const matchingPunch = world.attacks.find(
+      (attack) => attack.attackType === 'PUNCH' && attack.attackLevel === playerAttack.attackLevel,
+    );
+    if (matchingPunch) return matchingPunch;
+  }
+
+  if (world.player.phase === 'RECOVERY' && Math.random() < ai.counterRate) {
+    const counterPunch = world.attacks.find(
+      (attack) => attack.attackType === 'PUNCH' && attack.attackLevel === 'MID',
+    );
+    if (counterPunch && distance <= counterPunch.range + 78) return counterPunch;
+  }
+
+  const wantsKick = Math.random() < ai.kickRate;
   const candidates = world.attacks.filter((attack) =>
     wantsKick ? attack.attackType === 'KICK' : attack.attackType === 'PUNCH',
   );
@@ -579,18 +627,54 @@ function updateAI(world: World, dt: number) {
   world.aiRetreatTimer = Math.max(0, world.aiRetreatTimer - dt);
 
   if (world.aiRetreatTimer > 0) {
-    enemy.moveIntent = 1;
-  } else if (distance > 210) {
-    enemy.moveIntent = -1;
-  } else if (distance < 92) {
-    enemy.moveIntent = Math.random() < world.ai.retreatRate ? 1 : 0;
+    enemy.moveIntent = -enemy.direction;
+  } else if (distance > world.ai.preferredMaxRange) {
+    enemy.moveIntent = enemy.direction;
+  } else if (distance < world.ai.preferredMinRange) {
+    enemy.moveIntent = Math.random() < world.ai.retreatRate ? -enemy.direction : 0;
   } else {
     enemy.moveIntent = 0;
   }
 
+  const incomingPunch = player.attack?.data;
+  if (
+    incomingPunch?.attackType === 'PUNCH' &&
+    player.phase === 'STARTUP' &&
+    distance < 132 &&
+    world.ai.grappleRate > 0.75 &&
+    Math.random() < world.ai.grappleRate * 0.18
+  ) {
+    const matchingPunch = world.attacks.find(
+      (attack) => attack.attackType === 'PUNCH' && attack.attackLevel === incomingPunch.attackLevel,
+    );
+    if (matchingPunch && enemy.beginAttack(matchingPunch)) {
+      enemy.moveIntent = 0;
+      playTone(world, 185, 0.04, 0.016);
+      return;
+    }
+  }
+
   if (world.aiDecisionTimer > 0) return;
   world.aiDecisionTimer = (world.ai.reactionFrames / FPS) * (0.75 + Math.random() * 0.55);
-  if (distance > 235 || Math.random() > world.ai.aggression) return;
+  const playerAttack = player.attack?.data;
+  if (
+    playerAttack &&
+    player.phase === 'STARTUP' &&
+    distance <= playerAttack.range + 105 &&
+    Math.random() < world.ai.defense
+  ) {
+    if (playerAttack.attackLevel === 'HIGH') {
+      enemy.crouching = true;
+      enemy.moveIntent = 0;
+    } else if (playerAttack.attackLevel === 'LOW' && enemy.yOffset === 0) {
+      enemy.jump();
+    } else {
+      world.aiRetreatTimer = 0.22;
+      enemy.moveIntent = -enemy.direction;
+    }
+    return;
+  }
+  if (distance > world.ai.preferredMaxRange + 72 || Math.random() > world.ai.aggression) return;
 
   const attack = chooseAIAttack(world, distance);
   if (!attack) return;
@@ -598,7 +682,7 @@ function updateAI(world: World, dt: number) {
   if (distance <= practicalRange) {
     enemy.beginAttack(attack);
     playTone(world, attack.attackType === 'KICK' ? 145 : 220, 0.035, 0.012);
-    if (attack.attackType === 'KICK' && Math.random() < 0.28) world.aiRetreatTimer = 0.28;
+    if (attack.attackType === 'KICK' && Math.random() < world.ai.retreatRate) world.aiRetreatTimer = 0.3;
   }
 }
 
@@ -1044,7 +1128,7 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
   ctx.fillText('NEON KARATE', WIDTH / 2, 47);
   ctx.font = '700 12px ui-monospace, monospace';
   ctx.fillStyle = '#67e8f9';
-  ctx.fillText(world.gunMode ? 'SECRET GUN MODE // ACTIVE' : 'CITY DOJO // PROTOTYPE 02', WIDTH / 2, 68);
+  ctx.fillText(world.gunMode ? 'SECRET GUN MODE // ACTIVE' : 'CITY DOJO // PROTOTYPE 03', WIDTH / 2, 68);
 
   if (world.banner) {
     ctx.save();
@@ -1091,17 +1175,25 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
         WIDTH / 2,
         365,
       );
+      ctx.font = '900 20px ui-sans-serif, system-ui';
+      ctx.fillStyle = world.ai.accent;
+      ctx.fillText(`${world.ai.name} // ${world.ai.archetype}`, WIDTH / 2, 414);
+      ctx.font = '700 14px ui-monospace, monospace';
+      ctx.fillStyle = 'rgba(226, 232, 240, .72)';
+      ctx.fillText(world.ai.description, WIDTH / 2, 443);
     }
   }
 
   if (world.debug) {
     const distance = Math.round(Math.abs(world.player.x - world.enemy.x));
-    roundedRect(ctx, 20, 132, 310, 266, 14);
+    roundedRect(ctx, 20, 132, 322, 304, 14);
     ctx.fillStyle = 'rgba(2, 6, 23, .84)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(103, 232, 249, .4)';
     ctx.stroke();
     const lines = [
+      `AI      ${world.ai.id}`,
+      `AI ZONE ${world.ai.preferredMinRange}–${world.ai.preferredMaxRange}px`,
       `PLAYER  ${world.player.state}`,
       `ENEMY   ${world.enemy.state}`,
       `DIST    ${distance}px`,
@@ -1115,6 +1207,7 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
       `BULLETS ${world.projectiles.length}`,
       `BOXES   ${world.showBoxes ? 'ON' : 'OFF'}`,
     ];
+    ctx.textAlign = 'left';
     ctx.font = '700 14px ui-monospace, monospace';
     ctx.fillStyle = '#bae6fd';
     lines.forEach((line, index) => ctx.fillText(line, 38, 162 + index * 19));
@@ -1147,7 +1240,10 @@ export function KarateGame() {
   const [showBoxes, setShowBoxes] = useState(false);
   const [sound, setSound] = useState(true);
   const [gunMode, setGunMode] = useState(false);
+  const [opponents, setOpponents] = useState<AIData[]>([]);
+  const [activeOpponentIndex, setActiveOpponentIndex] = useState(0);
   const activeKeyLabels = gunMode ? gunKeyLabels : meleeKeyLabels;
+  const activeOpponent = opponents[activeOpponentIndex];
 
   useEffect(() => {
     let cancelled = false;
@@ -1167,7 +1263,10 @@ export function KarateGame() {
         loadImage('/fio-gun-actions-v1.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
-      const ai = (await aiResponse.json()) as AIData;
+      const aiPayload = (await aiResponse.json()) as AIData[] | AIData;
+      const ais = Array.isArray(aiPayload) ? aiPayload : [aiPayload];
+      const ai = ais[0];
+      if (!ai) throw new Error('No AI profiles were loaded.');
       if (cancelled) return;
       const world: World = {
         player: new Fighter('player', 'FIO // 白閃', 350, 1),
@@ -1183,7 +1282,9 @@ export function KarateGame() {
             .filter((attack) => attack.attackType === 'GUN')
             .map((attack) => [attack.input.toLowerCase(), attack]),
         ),
+        ais,
         ai,
+        aiIndex: 0,
         stage,
         fighterImage,
         actionSheet,
@@ -1210,8 +1311,11 @@ export function KarateGame() {
         frameHandle: 0,
         onStatus: setReactStatus,
         onGunMode: setGunMode,
+        onAIChange: setActiveOpponentIndex,
       };
       worldRef.current = world;
+      setOpponents(ais);
+      setActiveOpponentIndex(0);
       setReactStatus('READY');
 
       const loop = (time: number) => {
@@ -1244,6 +1348,7 @@ export function KarateGame() {
         trackSecretInput(world, key);
       }
       world.keys.add(key);
+      if (['1', '2', '3'].includes(key)) selectAI(world, Number(key) - 1);
       if (key === 'enter' && world.status === 'READY') resetWorld(world);
       if (key === 'r') resetWorld(world);
       if (key === 'p' && world.status === 'FIGHTING') {
@@ -1283,6 +1388,13 @@ export function KarateGame() {
     resetWorld(world);
     canvasRef.current?.focus();
   }, [ensureAudio]);
+
+  const selectOpponent = useCallback((index: number) => {
+    const world = worldRef.current;
+    if (!world) return;
+    selectAI(world, index);
+    canvasRef.current?.focus();
+  }, []);
 
   const press = useCallback((key: string) => {
     const world = worldRef.current;
@@ -1333,7 +1445,7 @@ export function KarateGame() {
       <header className="flex flex-col gap-3 border-b border-cyan-300/15 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.28em] text-cyan-300/75">
-            Prototype 02 · Modern Urban Karate
+            Prototype 03 · Rival Personalities
           </p>
           <h1 className="mt-1 text-2xl font-black tracking-[-0.04em] text-slate-50 sm:text-4xl">
             NEON KARATE <span className="text-cyan-300">// 城市道場</span>
@@ -1364,6 +1476,32 @@ export function KarateGame() {
           </Button>
         </div>
       </header>
+
+      <div className="rival-select" aria-label="選擇 AI 對手">
+        {opponents.map((opponent, index) => {
+          const selected = index === activeOpponentIndex;
+          return (
+            <button
+              key={opponent.id}
+              type="button"
+              onClick={() => selectOpponent(index)}
+              disabled={status === 'FIGHTING' || status === 'PAUSED'}
+              aria-pressed={selected}
+              className={`rival-card ${selected ? 'selected' : ''}`}
+              style={selected ? { borderColor: opponent.accent, boxShadow: `0 0 24px ${opponent.accent}22` } : undefined}
+            >
+              <span className="rival-index" style={{ color: opponent.accent }}>
+                0{index + 1} // {opponent.archetype}
+              </span>
+              <strong>{opponent.name}</strong>
+              <small>{opponent.description}</small>
+              <span className="rival-tendency">
+                拳 {Math.round(opponent.punchRate * 100)} · 踢 {Math.round(opponent.kickRate * 100)} · 反應 {opponent.reactionFrames}F
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
       <div className="relative overflow-hidden rounded-[18px] border border-cyan-200/20 bg-slate-950 shadow-[0_28px_100px_rgba(0,0,0,.45)]">
         <canvas
@@ -1422,8 +1560,8 @@ export function KarateGame() {
       </div>
 
       <footer className="flex flex-wrap items-center justify-between gap-2 px-1 font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500">
-        <p>{gunMode ? 'SECRET：Q/A/Z 射擊 · W/S/X 踢' : '鍵盤：方向鍵移動 · Q/A/Z 拳 · W/S/X 踢'}</p>
-        <p>{gunMode ? 'Projectile ON · D Debug · H Collider' : '密技：↑ ↑ ↓ ↓ ← → ← → Q W · D Debug · H Hitbox'}</p>
+        <p>{gunMode ? 'SECRET：Q/A/Z 射擊 · W/S/X 踢' : `1/2/3 選對手 · ${activeOpponent?.archetype ?? '載入對手中'}`}</p>
+        <p>{gunMode ? 'Projectile ON · D Debug · H Collider' : '方向鍵移動 · Q/A/Z 拳 · W/S/X 踢 · D Debug · H Hitbox'}</p>
       </footer>
     </section>
   );
