@@ -121,6 +121,8 @@ interface World {
   stage: HTMLImageElement;
   fighterImage: HTMLImageElement;
   actionSheet: HTMLImageElement;
+  playerReactionSheet: HTMLImageElement;
+  enemySheets: HTMLImageElement[];
   gunSheet: HTMLImageElement;
   status: GameStatus;
   previousStatus: GameStatus;
@@ -920,7 +922,7 @@ function drawBar(
 }
 
 function actionFrameFor(fighter: Fighter) {
-  if (fighter.state === 'KNOCKDOWN' || fighter.state.startsWith('HIT_')) return 7;
+  if (fighter.state === 'KNOCKDOWN' || fighter.state.startsWith('HIT_')) return 0;
   if (fighter.state === 'THROW') return 2;
   if (!fighter.attack) return 0;
 
@@ -935,26 +937,36 @@ function actionFrameFor(fighter: Fighter) {
   return actionFrame;
 }
 
+function reactionFrameFor(fighter: Fighter) {
+  if (fighter.state === 'KNOCKDOWN') return 3;
+  if (fighter.state === 'HIT_HIGH') return 0;
+  if (fighter.state === 'HIT_MID') return 1;
+  if (fighter.state === 'HIT_LOW') return 2;
+  return null;
+}
+
 function drawActionFrame(
   ctx: CanvasRenderingContext2D,
   sheet: HTMLImageElement,
   frame: number,
   size: number,
   xOffset = 0,
+  rows = 2,
 ) {
   const sourceWidth = sheet.width / 4;
-  const sourceHeight = sheet.height / 2;
+  const sourceHeight = sheet.height / rows;
   const column = frame % 4;
   const row = Math.floor(frame / 4);
+  const drawWidth = size * (sourceWidth / sourceHeight);
   ctx.drawImage(
     sheet,
     column * sourceWidth,
     row * sourceHeight,
     sourceWidth,
     sourceHeight,
-    -size / 2 + xOffset,
+    -drawWidth / 2 + xOffset,
     -size,
-    size,
+    drawWidth,
     size,
   );
 }
@@ -995,9 +1007,12 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
   const phase = fighter.phase;
   const attack = fighter.attack?.data;
   const frame = actionFrameFor(fighter);
+  const reactionFrame = reactionFrameFor(fighter);
   const gunFrame = gunFrameFor(fighter);
-  const isHitPose = fighter.state === 'KNOCKDOWN' || fighter.state.startsWith('HIT_');
+  const isHitPose = reactionFrame !== null;
   const useGunPose = fighter.id === 'player' && world.gunMode && !isHitPose && (!attack || attack.attackType === 'GUN');
+  const combatSheet = isEnemy ? world.enemySheets[world.aiIndex] : world.actionSheet;
+  const combatSheetRows = isEnemy ? 3 : 2;
   const attackTotal = attack
     ? attack.startupFrames + attack.activeFrames + attack.recoveryFrames
     : 1;
@@ -1008,14 +1023,12 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
     : 0;
   const clock = world.lastTime / 1000;
   const moving = fighter.state === 'MOVE_FORWARD' || fighter.state === 'MOVE_BACKWARD';
-  const bodyBob = fighter.yOffset > 0
+  const bodyBob = fighter.yOffset > 0 || isHitPose
     ? 0
     : moving
       ? Math.sin(clock * 15 + (isEnemy ? 1.7 : 0)) * 6
       : Math.sin(clock * 3.4 + (isEnemy ? 1.2 : 0)) * 2;
   const crouchScale = fighter.crouching ? 0.78 : 1;
-  const hitRotation = fighter.state.startsWith('HIT_') ? fighter.direction * 0.12 : 0;
-  const knockRotation = fighter.state === 'KNOCKDOWN' ? fighter.direction * 1.18 : hitRotation;
   const attackRotation = attack && attack.attackType !== 'GUN'
     ? fighter.direction * actionPulse * (attack.attackType === 'KICK' ? -0.055 : -0.025)
     : 0;
@@ -1031,21 +1044,23 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
 
   ctx.save();
   ctx.translate(fighter.x + fighter.direction * activeThrust, baseY + bodyBob);
-  ctx.rotate(knockRotation + attackRotation);
+  ctx.rotate(attackRotation);
   ctx.scale(fighter.direction * (1 + actionPulse * 0.035), crouchScale * (1 - actionPulse * 0.025));
-  if (isEnemy) ctx.filter = 'sepia(.8) hue-rotate(292deg) saturate(1.8) brightness(.68) contrast(1.08)';
   if (fighter.flash > 0) ctx.filter = 'brightness(2.5) saturate(.2)';
   if (fighter.guardFlash > 0) ctx.filter = 'brightness(1.45) saturate(1.8)';
   if (!useGunPose && frame !== 0 && (phase === 'ACTIVE' || phase === 'RECOVERY')) {
     for (let trail = 3; trail >= 1; trail -= 1) {
       ctx.save();
       ctx.globalAlpha = 0.055 * trail;
-      drawActionFrame(ctx, world.actionSheet, frame, poseSize, -trail * 18);
+      drawActionFrame(ctx, combatSheet, frame, poseSize, -trail * 18, combatSheetRows);
       ctx.restore();
     }
   }
-  if (useGunPose) drawGunFrame(ctx, world.gunSheet, gunFrame, poseSize);
-  else drawActionFrame(ctx, world.actionSheet, frame, poseSize);
+  if (isHitPose && reactionFrame !== null) {
+    if (isEnemy) drawActionFrame(ctx, combatSheet, reactionFrame + 8, poseSize, 0, 3);
+    else drawActionFrame(ctx, world.playerReactionSheet, reactionFrame, poseSize, 0, 1);
+  } else if (useGunPose) drawGunFrame(ctx, world.gunSheet, gunFrame, poseSize);
+  else drawActionFrame(ctx, combatSheet, frame, poseSize, 0, combatSheetRows);
   ctx.restore();
 
   if (attack && phase === 'ACTIVE') {
@@ -1132,8 +1147,8 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
     ctx.restore();
   }
 
-  drawFighter(ctx, world, world.player);
   drawFighter(ctx, world, world.enemy);
+  drawFighter(ctx, world, world.player);
 
   for (const impact of world.impacts) {
     const progress = impact.life / 0.55;
@@ -1181,7 +1196,7 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
   ctx.fillText('NEON KARATE', WIDTH / 2, 47);
   ctx.font = '700 12px ui-monospace, monospace';
   ctx.fillStyle = '#67e8f9';
-  ctx.fillText(world.gunMode ? 'SECRET GUN MODE // ACTIVE' : 'CITY DOJO // PROTOTYPE 04', WIDTH / 2, 68);
+  ctx.fillText(world.gunMode ? 'SECRET GUN MODE // ACTIVE' : 'CITY DOJO // PROTOTYPE 05', WIDTH / 2, 68);
   const playerRoundMarks = `${'◆'.repeat(world.playerRounds)}${'◇'.repeat(2 - world.playerRounds)}`;
   const enemyRoundMarks = `${'◆'.repeat(world.enemyRounds)}${'◇'.repeat(2 - world.enemyRounds)}`;
   ctx.font = '900 13px ui-monospace, monospace';
@@ -1330,12 +1345,27 @@ export function KarateGame() {
     const renderContext = context;
 
     async function boot() {
-      const [attacksResponse, aiResponse, stage, fighterImage, actionSheet, gunSheet] = await Promise.all([
+      const [
+        attacksResponse,
+        aiResponse,
+        stage,
+        fighterImage,
+        actionSheet,
+        playerReactionSheet,
+        quickFistSheet,
+        longKickSheet,
+        grapplerSheet,
+        gunSheet,
+      ] = await Promise.all([
         fetch('/game-data/attacks.json'),
         fetch('/game-data/ai.json'),
         loadImage('/urban-stage.png'),
         loadImage('/fio-fighter.png'),
         loadImage('/fio-actions-v2.png'),
+        loadImage('/fio-hit-reactions-v2.png'),
+        loadImage('/enemy-quick-fist-v2.png'),
+        loadImage('/enemy-long-kick-v2.png'),
+        loadImage('/enemy-grappler-v2.png'),
         loadImage('/fio-gun-actions-v1.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
@@ -1364,6 +1394,8 @@ export function KarateGame() {
         stage,
         fighterImage,
         actionSheet,
+        playerReactionSheet,
+        enemySheets: [quickFistSheet, longKickSheet, grapplerSheet],
         gunSheet,
         status: 'READY',
         previousStatus: 'READY',
@@ -1528,7 +1560,7 @@ export function KarateGame() {
       <header className="flex flex-col gap-3 border-b border-cyan-300/15 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.28em] text-cyan-300/75">
-            Prototype 04 · Best of Three
+            Prototype 05 · Distinct Fighters
           </p>
           <h1 className="mt-1 text-2xl font-black tracking-[-0.04em] text-slate-50 sm:text-4xl">
             NEON KARATE <span className="text-cyan-300">// 城市道場</span>
