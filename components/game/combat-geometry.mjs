@@ -14,7 +14,7 @@ export const HURTBOX_OFFSETS = {
 };
 
 export const MELEE_HITBOX_OFFSETS = {
-  HIGH: { y: -285, h: 42 },
+  HIGH: { y: -304, h: 70 },
   MID: { y: -134, h: 31 },
   LOW: { y: -70, h: 38 },
 };

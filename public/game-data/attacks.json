@@ -8,7 +8,7 @@
     "startupFrames": 5,
     "activeFrames": 3,
     "recoveryFrames": 8,
-    "range": 48,
+    "range": 72,
     "damage": 9,
     "staminaCost": 5,
     "hitStunFrames": 12,

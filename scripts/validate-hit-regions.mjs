@@ -64,4 +64,28 @@ for (const attack of attacks) {
   );
 }
 
+const highPunch = attacks.find((attack) => attack.id === 'punch-high');
+assert.ok(highPunch, 'Expected punch-high attack data');
+const highPunchDistance = 128;
+const highPunchDefenderX = attackerX + highPunchDistance;
+const highPunchGeometry = MELEE_HITBOX_OFFSETS.HIGH;
+const highPunchBox = {
+  x: attackerX + 22,
+  y: groundY + highPunchGeometry.y,
+  w: highPunch.range + 10,
+  h: highPunchGeometry.h,
+};
+const highPunchTarget = Object.fromEntries(
+  ATTACK_LEVELS.map((level) => [
+    level,
+    translatedRect(highPunchDefenderX, groundY, HURTBOX_OFFSETS.standing[level]),
+  ]),
+);
+assert.deepEqual(
+  overlappingLevels(highPunchBox, highPunchTarget),
+  ['HIGH'],
+  `Upper punch should reach a standing opponent at ${highPunchDistance}px`,
+);
+console.log(`✓ 上段拳 reaches a standing opponent at ${highPunchDistance}px`);
+
 console.log(`Validated ${attacks.length} attacks across HIGH / MID / LOW regions and both stances.`);

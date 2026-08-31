@@ -132,7 +132,6 @@ interface World {
   playerReactionSheet: HTMLImageElement;
   enemySheets: HTMLImageElement[];
   playerGuardSheet: HTMLImageElement;
-  enemyGuardSheets: HTMLImageElement[];
   gunSheet: HTMLImageElement;
   status: GameStatus;
   previousStatus: GameStatus;
@@ -166,6 +165,11 @@ interface World {
 }
 
 const levelIndex: Record<AttackLevel, number> = { HIGH: 0, MID: 1, LOW: 2 };
+const PLAYER_ACTION_SIZE = 382;
+const PLAYER_REACTION_SIZE = 448;
+const PLAYER_GUARD_SIZE = 476;
+const PLAYER_GUN_SIZE = 359;
+const ENEMY_ACTION_SIZE = 376;
 const attackInputByLevel: Record<'PUNCH' | 'KICK' | 'GUN', Record<AttackLevel, string>> = {
   PUNCH: { HIGH: 'q', MID: 'a', LOW: 'z' },
   KICK: { HIGH: 'w', MID: 's', LOW: 'x' },
@@ -990,7 +994,7 @@ function drawGunFrame(
     sourceWidth,
     sheet.height,
     -width / 2,
-    -height + 30,
+    -height,
     width,
     height,
   );
@@ -1011,7 +1015,6 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
   const isCrouchPose = fighter.crouching && !isHitPose && !isGuardPose && !attack;
   const useGunPose = fighter.id === 'player' && world.gunMode && !isHitPose && !isGuardPose && !isCrouchPose && (!attack || attack.attackType === 'GUN');
   const combatSheet = isEnemy ? world.enemySheets[world.aiIndex] : world.actionSheet;
-  const guardSheet = isEnemy ? world.enemyGuardSheets[world.aiIndex] : world.playerGuardSheet;
   const combatSheetRows = isEnemy ? 3 : 2;
   const attackTotal = attack
     ? attack.startupFrames + attack.activeFrames + attack.recoveryFrames
@@ -1031,7 +1034,7 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
   const attackRotation = attack && attack.attackType !== 'GUN'
     ? fighter.direction * actionPulse * (attack.attackType === 'KICK' ? -0.055 : -0.025)
     : 0;
-  const poseSize = fighter.state === 'KNOCKDOWN' ? 372 : 382;
+  const actionSize = isEnemy ? ENEMY_ACTION_SIZE : PLAYER_ACTION_SIZE;
 
   ctx.save();
   ctx.globalAlpha = 0.38;
@@ -1044,24 +1047,26 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
   ctx.save();
   ctx.translate(fighter.x + fighter.direction * activeThrust, baseY + bodyBob);
   ctx.rotate(attackRotation);
-  ctx.scale(fighter.direction * (1 + actionPulse * 0.035), 1 - actionPulse * 0.025);
+  ctx.scale(fighter.direction, 1);
   if (!useGunPose && frame !== 0 && (phase === 'ACTIVE' || phase === 'RECOVERY')) {
     for (let trail = 3; trail >= 1; trail -= 1) {
       ctx.save();
       ctx.globalAlpha = 0.055 * trail;
-      drawActionFrame(ctx, combatSheet, frame, poseSize, -trail * 18, combatSheetRows);
+      drawActionFrame(ctx, combatSheet, frame, actionSize, -trail * 18, combatSheetRows);
       ctx.restore();
     }
   }
   if (isHitPose && reactionFrame !== null) {
-    if (isEnemy) drawActionFrame(ctx, combatSheet, reactionFrame + 8, poseSize, 0, 3);
-    else drawActionFrame(ctx, world.playerReactionSheet, reactionFrame, poseSize, 0, 1);
+    if (isEnemy) drawActionFrame(ctx, combatSheet, reactionFrame + 8, ENEMY_ACTION_SIZE, 0, 3);
+    else drawActionFrame(ctx, world.playerReactionSheet, reactionFrame, PLAYER_REACTION_SIZE, 0, 1);
   } else if (isGuardPose && guardFrame !== null) {
-    drawActionFrame(ctx, guardSheet, guardFrame, poseSize, 0, 1);
+    if (isEnemy) drawActionFrame(ctx, combatSheet, guardFrame + 7, ENEMY_ACTION_SIZE, 0, 3);
+    else drawActionFrame(ctx, world.playerGuardSheet, guardFrame, PLAYER_GUARD_SIZE, 0, 1);
   } else if (isCrouchPose) {
-    drawActionFrame(ctx, guardSheet, 3, poseSize, 0, 1);
-  } else if (useGunPose) drawGunFrame(ctx, world.gunSheet, gunFrame, poseSize);
-  else drawActionFrame(ctx, combatSheet, frame, poseSize, 0, combatSheetRows);
+    if (isEnemy) drawActionFrame(ctx, combatSheet, 10, ENEMY_ACTION_SIZE, 0, 3);
+    else drawActionFrame(ctx, world.playerGuardSheet, 3, PLAYER_GUARD_SIZE, 0, 1);
+  } else if (useGunPose) drawGunFrame(ctx, world.gunSheet, gunFrame, PLAYER_GUN_SIZE);
+  else drawActionFrame(ctx, combatSheet, frame, actionSize, 0, combatSheetRows);
   ctx.restore();
 
   if (attack && phase === 'ACTIVE') {
@@ -1352,9 +1357,6 @@ export function KarateGame() {
         longKickSheet,
         grapplerSheet,
         playerGuardSheet,
-        quickFistGuardSheet,
-        longKickGuardSheet,
-        grapplerGuardSheet,
         gunSheet,
       ] = await Promise.all([
         fetch('/game-data/attacks.json'),
@@ -1366,9 +1368,6 @@ export function KarateGame() {
         loadImage('/enemy-long-kick-v2.png'),
         loadImage('/enemy-grappler-v2.png'),
         loadImage('/fio-guards-v1.png'),
-        loadImage('/enemy-quick-fist-guards-v1.png'),
-        loadImage('/enemy-long-kick-guards-v1.png'),
-        loadImage('/enemy-grappler-guards-v1.png'),
         loadImage('/fio-gun-actions-v1.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
@@ -1399,7 +1398,6 @@ export function KarateGame() {
         playerReactionSheet,
         enemySheets: [quickFistSheet, longKickSheet, grapplerSheet],
         playerGuardSheet,
-        enemyGuardSheets: [quickFistGuardSheet, longKickGuardSheet, grapplerGuardSheet],
         gunSheet,
         status: 'READY',
         previousStatus: 'READY',
