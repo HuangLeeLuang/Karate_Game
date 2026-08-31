@@ -169,11 +169,16 @@ const PLAYER_ACTION_SIZE = 382;
 const PLAYER_REACTION_SIZE = 448;
 const PLAYER_GUARD_SIZE = 476;
 const PLAYER_GUN_SIZE = 359;
-const PLAYER_ACTION_GROUND_OFFSET = 15;
-const PLAYER_REACTION_GROUND_OFFSET = 35;
-const PLAYER_GUARD_GROUND_OFFSET = 24;
 const PLAYER_GUN_GROUND_OFFSET = 3;
 const ENEMY_ACTION_SIZES = [372, 367, 375] as const;
+const PLAYER_ACTION_GROUND_OFFSETS = [15, 17, 16, 18, 37, 36, 34, 32] as const;
+const PLAYER_REACTION_GROUND_OFFSETS = [35, 34, 35, 37] as const;
+const PLAYER_GUARD_GROUND_OFFSETS = [24, 29, 26, 29] as const;
+const ENEMY_ACTION_GROUND_OFFSETS = [
+  [0, 0, 0, 0, 15, 14, 23, 16, 43, 43, 43, 38],
+  [0, 0, 0, 0, 0, 0, 0, 0, 59, 58, 53, 47],
+  [0, 0, 0, 0, 0, 0, 0, 0, 39, 39, 41, 38],
+] as const;
 const attackInputByLevel: Record<'PUNCH' | 'KICK' | 'GUN', Record<AttackLevel, string>> = {
   PUNCH: { HIGH: 'q', MID: 'a', LOW: 'z' },
   KICK: { HIGH: 'w', MID: 's', LOW: 'x' },
@@ -376,6 +381,7 @@ class Fighter {
     this.state = `HIT_${data.attackLevel}`;
     this.attack = null;
     this.crouching = false;
+    if (this.yOffset > 0) this.verticalVelocity = Math.min(this.verticalVelocity, -80);
     this.x += direction * data.knockback * (counter ? 1.35 : 1);
   }
 }
@@ -843,8 +849,9 @@ function checkKO(world: World) {
   };
   emitMatch(world);
   setStatus(world, 'KO');
-  world.hitStop = 0.16;
-  world.shake = 14;
+  world.hitStop = 0;
+  world.shake = 0;
+  world.impacts = [];
   playTone(world, playerWon ? 520 : 96, 0.3, 0.06);
 }
 
@@ -1040,8 +1047,11 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
     ? fighter.direction * actionPulse * (attack.attackType === 'KICK' ? -0.055 : -0.025)
     : 0;
   const enemyActionSize = ENEMY_ACTION_SIZES[world.aiIndex] ?? ENEMY_ACTION_SIZES[0];
+  const enemyGroundOffsets = ENEMY_ACTION_GROUND_OFFSETS[world.aiIndex] ?? ENEMY_ACTION_GROUND_OFFSETS[0];
   const actionSize = isEnemy ? enemyActionSize : PLAYER_ACTION_SIZE;
-  const actionGroundOffset = isEnemy ? 0 : PLAYER_ACTION_GROUND_OFFSET;
+  const actionGroundOffset = isEnemy
+    ? enemyGroundOffsets[frame] ?? 0
+    : PLAYER_ACTION_GROUND_OFFSETS[frame] ?? PLAYER_ACTION_GROUND_OFFSETS[0];
 
   ctx.save();
   ctx.globalAlpha = 0.38;
@@ -1064,14 +1074,22 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
     }
   }
   if (isHitPose && reactionFrame !== null) {
-    if (isEnemy) drawActionFrame(ctx, combatSheet, reactionFrame + 8, enemyActionSize, 0, 3);
-    else drawActionFrame(ctx, world.playerReactionSheet, reactionFrame, PLAYER_REACTION_SIZE, 0, 1, PLAYER_REACTION_GROUND_OFFSET);
+    if (isEnemy) {
+      const enemyReactionFrame = reactionFrame + 8;
+      drawActionFrame(ctx, combatSheet, enemyReactionFrame, enemyActionSize, 0, 3, enemyGroundOffsets[enemyReactionFrame] ?? 0);
+    } else {
+      drawActionFrame(ctx, world.playerReactionSheet, reactionFrame, PLAYER_REACTION_SIZE, 0, 1, PLAYER_REACTION_GROUND_OFFSETS[reactionFrame] ?? 0);
+    }
   } else if (isGuardPose && guardFrame !== null) {
-    if (isEnemy) drawActionFrame(ctx, combatSheet, guardFrame + 7, enemyActionSize, 0, 3);
-    else drawActionFrame(ctx, world.playerGuardSheet, guardFrame, PLAYER_GUARD_SIZE, 0, 1, PLAYER_GUARD_GROUND_OFFSET);
+    if (isEnemy) {
+      const enemyGuardFrame = guardFrame + 7;
+      drawActionFrame(ctx, combatSheet, enemyGuardFrame, enemyActionSize, 0, 3, enemyGroundOffsets[enemyGuardFrame] ?? 0);
+    } else {
+      drawActionFrame(ctx, world.playerGuardSheet, guardFrame, PLAYER_GUARD_SIZE, 0, 1, PLAYER_GUARD_GROUND_OFFSETS[guardFrame] ?? 0);
+    }
   } else if (isCrouchPose) {
-    if (isEnemy) drawActionFrame(ctx, combatSheet, 10, enemyActionSize, 0, 3);
-    else drawActionFrame(ctx, world.playerGuardSheet, 3, PLAYER_GUARD_SIZE, 0, 1, PLAYER_GUARD_GROUND_OFFSET);
+    if (isEnemy) drawActionFrame(ctx, combatSheet, 10, enemyActionSize, 0, 3, enemyGroundOffsets[10] ?? 0);
+    else drawActionFrame(ctx, world.playerGuardSheet, 3, PLAYER_GUARD_SIZE, 0, 1, PLAYER_GUARD_GROUND_OFFSETS[3]);
   } else if (useGunPose) drawGunFrame(ctx, world.gunSheet, gunFrame, PLAYER_GUN_SIZE);
   else drawActionFrame(ctx, combatSheet, frame, actionSize, 0, combatSheetRows, actionGroundOffset);
   ctx.restore();
