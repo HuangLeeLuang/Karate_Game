@@ -128,7 +128,6 @@ interface World {
   ai: AIData;
   aiIndex: number;
   stage: HTMLImageElement;
-  fighterImage: HTMLImageElement;
   actionSheet: HTMLImageElement;
   playerReactionSheet: HTMLImageElement;
   enemySheets: HTMLImageElement[];
@@ -1419,7 +1418,6 @@ export function KarateGame() {
         attacksResponse,
         aiResponse,
         stage,
-        fighterImage,
         actionSheet,
         playerReactionSheet,
         quickFistSheet,
@@ -1434,7 +1432,6 @@ export function KarateGame() {
         fetch('/game-data/attacks.json'),
         fetch('/game-data/ai.json'),
         loadImage('/urban-stage.png'),
-        loadImage('/fio-fighter.png'),
         loadImage('/fio-actions-v2.png'),
         loadImage('/fio-hit-reactions-v2.png'),
         loadImage('/enemy-quick-fist-v2.png'),
@@ -1470,7 +1467,6 @@ export function KarateGame() {
         ai,
         aiIndex: 0,
         stage,
-        fighterImage,
         actionSheet,
         playerReactionSheet,
         enemySheets: [quickFistSheet, longKickSheet, grapplerSheet],
