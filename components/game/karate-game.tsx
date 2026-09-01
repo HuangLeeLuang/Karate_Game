@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { Bug, Crosshair, Play, RotateCcw, Volume2, VolumeX } from 'lucide-react';
+import { Bug, Crosshair, Download, Play, RotateCcw, Smartphone, Volume2, VolumeX, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -118,6 +118,11 @@ interface MatchView {
   enemyRounds: number;
   roundNumber: number;
   matchOver: boolean;
+}
+
+interface InstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 }
 
 interface World {
@@ -1318,6 +1323,9 @@ export function KarateGame() {
   const [gunMode, setGunMode] = useState(false);
   const [opponents, setOpponents] = useState<AIData[]>([]);
   const [activeOpponentIndex, setActiveOpponentIndex] = useState(0);
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [showInstallHelp, setShowInstallHelp] = useState(false);
   const [matchView, setMatchView] = useState<MatchView>({
     playerRounds: 0,
     enemyRounds: 0,
@@ -1338,6 +1346,38 @@ export function KarateGame() {
           ? '再戰一場'
           : '下一回合'
         : '開始三戰兩勝';
+
+  useEffect(() => {
+    const standaloneQuery = window.matchMedia('(display-mode: standalone)');
+    const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };
+    const updateInstalledState = () => {
+      setIsInstalled(standaloneQuery.matches || navigatorWithStandalone.standalone === true);
+    };
+    const captureInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    const markInstalled = () => {
+      setIsInstalled(true);
+      setInstallPrompt(null);
+      setShowInstallHelp(false);
+    };
+
+    const frame = window.requestAnimationFrame(updateInstalledState);
+    standaloneQuery.addEventListener('change', updateInstalledState);
+    window.addEventListener('beforeinstallprompt', captureInstallPrompt);
+    window.addEventListener('appinstalled', markInstalled);
+    if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+      navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+    }
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      standaloneQuery.removeEventListener('change', updateInstalledState);
+      window.removeEventListener('beforeinstallprompt', captureInstallPrompt);
+      window.removeEventListener('appinstalled', markInstalled);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1565,6 +1605,17 @@ export function KarateGame() {
     ensureAudio();
   }, [ensureAudio]);
 
+  const installGame = useCallback(async () => {
+    if (!installPrompt) {
+      setShowInstallHelp(true);
+      return;
+    }
+    await installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice.outcome === 'accepted') setIsInstalled(true);
+    setInstallPrompt(null);
+  }, [installPrompt]);
+
   const holdProps = (key: string) => {
     const finishPress = (event: ReactPointerEvent) => {
       release(key);
@@ -1612,6 +1663,11 @@ export function KarateGame() {
             {status === 'FIGHTING' || status === 'PAUSED' ? <RotateCcw /> : <Play />}
             {startLabel}
           </Button>
+          {!isInstalled && (
+            <Button onClick={installGame} variant="outline" size="lg">
+              <Download /> 下載到手機
+            </Button>
+          )}
           <Button onClick={toggleDebug} variant="outline" size="lg" aria-pressed={debug}>
             <Bug /> Debug
           </Button>
@@ -1694,6 +1750,12 @@ export function KarateGame() {
                 {startLabel}
               </button>
             )}
+            {!isInstalled && (
+              <button className="mobile-install-button" onClick={installGame} aria-label="安裝遊戲到手機">
+                <Download />
+                <span>安裝</span>
+              </button>
+            )}
             <div className="mobile-attack-pad" aria-label="攻擊控制">
               {activeKeyLabels.map(({ input, label, tone }) => (
                 <button
@@ -1754,6 +1816,25 @@ export function KarateGame() {
         <p>{gunMode ? 'SECRET：↑/↓ 選段位 · Q 射擊 · W 踢擊' : `三戰兩勝 · 1/2/3 選對手 · ${activeOpponent?.archetype ?? '載入對手中'}`}</p>
         <p>方向鍵移動／選段位 · Q 拳 · W 腳 · R 下一回合</p>
       </footer>
+      {showInstallHelp && (
+        <div className="install-help-backdrop">
+          <dialog
+            open
+            className="install-help-card"
+            aria-modal="true"
+            aria-labelledby="install-help-title"
+          >
+            <button className="install-help-close" onClick={() => setShowInstallHelp(false)} aria-label="關閉安裝說明">
+              <X />
+            </button>
+            <Smartphone className="install-help-icon" aria-hidden="true" />
+            <h2 id="install-help-title">下載到手機遊玩</h2>
+            <p><strong>iPhone／iPad：</strong>使用 Safari 開啟，按「分享」後選擇「加入主畫面」。</p>
+            <p><strong>Android：</strong>使用 Chrome 開啟選單，選擇「安裝應用程式」或「加到主畫面」。</p>
+            <p className="install-help-note">安裝完成後可直接從手機桌面啟動，橫置即可使用虛擬按鍵。</p>
+          </dialog>
+        </div>
+      )}
     </section>
   );
 }
