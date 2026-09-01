@@ -272,3 +272,169 @@ button {
 .attack-button:active {
   transform: translateY(2px) scale(.985);
 }
+
+.mobile-landscape-controls {
+  display: none;
+}
+
+@media (orientation: landscape) and (max-height: 600px) {
+  .game-shell {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: block;
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    padding: 0;
+    overflow: hidden;
+    background: #020617;
+  }
+
+  .game-header,
+  .rival-select,
+  .standard-controls,
+  .game-footer {
+    display: none;
+  }
+
+  .game-stage {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .game-canvas {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+    object-fit: contain;
+  }
+
+  .mobile-landscape-controls {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: minmax(8.5rem, 22vw) 1fr minmax(8.5rem, 22vw);
+    align-items: end;
+    gap: 1rem;
+    padding:
+      max(.7rem, env(safe-area-inset-top))
+      max(1rem, env(safe-area-inset-right))
+      max(.7rem, env(safe-area-inset-bottom))
+      max(1rem, env(safe-area-inset-left));
+    pointer-events: none;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  .mobile-dpad {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(2.8rem, 1fr));
+    gap: .38rem;
+  }
+
+  .mobile-dpad button,
+  .mobile-attack-pad button,
+  .mobile-start-button {
+    pointer-events: auto;
+    touch-action: none;
+    border: 1px solid rgba(207, 250, 254, .5);
+    background: rgba(2, 6, 23, .58);
+    color: #ecfeff;
+    box-shadow: inset 0 1px rgba(255, 255, 255, .12), 0 0 20px rgba(34, 211, 238, .12);
+    backdrop-filter: blur(7px);
+  }
+
+  .mobile-dpad button {
+    min-height: 2.9rem;
+    border-radius: .85rem;
+    font-size: 1.3rem;
+    font-weight: 900;
+  }
+
+  .mobile-attack-pad {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(3.7rem, 1fr));
+    gap: .55rem;
+  }
+
+  .mobile-attack-pad button {
+    display: grid;
+    min-height: 4.25rem;
+    place-items: center;
+    gap: .08rem;
+    border-radius: 999px;
+    font-size: .82rem;
+    font-weight: 900;
+  }
+
+  .mobile-attack-pad button.punch {
+    border-color: rgba(251, 191, 36, .72);
+    background: rgba(120, 53, 15, .58);
+  }
+
+  .mobile-attack-pad button.kick {
+    border-color: rgba(251, 113, 133, .72);
+    background: rgba(131, 24, 67, .58);
+  }
+
+  .mobile-attack-pad button.shot {
+    border-color: rgba(34, 211, 238, .78);
+    background: rgba(8, 145, 178, .5);
+  }
+
+  .mobile-attack-pad kbd {
+    font-family: var(--font-geist-mono), monospace;
+    font-size: .58rem;
+    opacity: .72;
+  }
+
+  .mobile-dpad button:active,
+  .mobile-attack-pad button:active {
+    transform: scale(.94);
+    background: rgba(14, 116, 144, .72);
+  }
+
+  .mobile-attack-pad button:disabled {
+    pointer-events: none;
+    opacity: .28;
+  }
+
+  .mobile-start-button {
+    position: absolute;
+    top: max(.7rem, env(safe-area-inset-top));
+    left: 50%;
+    min-width: 8rem;
+    min-height: 2.6rem;
+    padding: .45rem 1rem;
+    transform: translateX(-50%);
+    border-color: rgba(103, 232, 249, .78);
+    border-radius: 999px;
+    background: rgba(8, 145, 178, .84);
+    font-size: .74rem;
+    font-weight: 900;
+    letter-spacing: .08em;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 420px) {
+  .mobile-landscape-controls {
+    grid-template-columns: minmax(7.5rem, 20vw) 1fr minmax(7.5rem, 20vw);
+    padding-top: .45rem;
+    padding-bottom: .45rem;
+  }
+
+  .mobile-dpad button {
+    min-height: 2.55rem;
+  }
+
+  .mobile-attack-pad button {
+    min-height: 3.75rem;
+  }
+}
