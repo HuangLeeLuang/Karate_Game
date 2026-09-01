@@ -24,6 +24,12 @@ export const PLAYER_MELEE_REACH_BONUS = {
   KICK: 36,
 };
 
+export const PLAYER_GUN_MUZZLE_OFFSETS = {
+  HIGH: { x: 66, y: -331 },
+  MID: { x: 80, y: -266 },
+  LOW: { x: 84, y: -130 },
+};
+
 export const PROJECTILE_Y_OFFSETS = {
   HIGH: -270,
   MID: -120,

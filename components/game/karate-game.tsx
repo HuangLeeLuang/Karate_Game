@@ -8,6 +8,7 @@ import {
   ATTACK_LEVELS,
   HURTBOX_OFFSETS,
   MELEE_HITBOX_OFFSETS,
+  PLAYER_GUN_MUZZLE_OFFSETS,
   PLAYER_MELEE_REACH_BONUS,
   PROJECTILE_Y_OFFSETS,
   overlappingLevels,
@@ -776,12 +777,15 @@ function spawnProjectiles(world: World) {
 
     runtime.hitResolved = true;
     const speed = runtime.data.projectileSpeed ?? 1400;
-    const startX = fighter.x + fighter.direction * 96;
+    const muzzle = fighter.id === 'player'
+      ? PLAYER_GUN_MUZZLE_OFFSETS[runtime.data.attackLevel]
+      : { x: 96, y: PROJECTILE_Y_OFFSETS[runtime.data.attackLevel] };
+    const startX = fighter.x + fighter.direction * muzzle.x;
     world.projectiles.push({
       owner: fighter.id,
       x: startX,
       previousX: startX,
-      y: GROUND_Y - fighter.yOffset + PROJECTILE_Y_OFFSETS[runtime.data.attackLevel],
+      y: GROUND_Y - fighter.yOffset + muzzle.y,
       velocityX: speed * fighter.direction,
       lifetime: Math.min(1, runtime.data.range / speed + 0.12),
       data: runtime.data,
@@ -805,9 +809,12 @@ function updateProjectiles(world: World, dt: number) {
       w: Math.abs(projectile.x - projectile.previousX) + 26,
       h: 16,
     };
-    const hurtboxes = defender.hurtboxes();
-    const reachedLevels = overlappingLevels(collider, hurtboxes);
-    if (!reachedLevels.includes(projectile.data.attackLevel)) continue;
+    const targetBox = defender.hurtboxes()[projectile.data.attackLevel];
+    const crossedTarget = collider.x < targetBox.x + targetBox.w && collider.x + collider.w > targetBox.x;
+    const evadedByStance =
+      (projectile.data.attackLevel === 'HIGH' && defender.crouching) ||
+      (projectile.data.attackLevel === 'LOW' && defender.yOffset > 24);
+    if (!crossedTarget || evadedByStance) continue;
 
     const direction = Math.sign(projectile.velocityX) as Direction;
     const guarded = defender.canAutoGuard(projectile.data.attackLevel);
@@ -1400,7 +1407,7 @@ export function KarateGame() {
         loadImage('/enemy-long-kick-v3.png'),
         loadImage('/enemy-grappler-v3.png'),
         loadImage('/fio-guards-v2.png'),
-        loadImage('/fio-gun-actions-v2.png'),
+        loadImage('/fio-gun-actions-v3.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
       const aiPayload = (await aiResponse.json()) as AIData[] | AIData;

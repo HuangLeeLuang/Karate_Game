@@ -5,6 +5,7 @@ import {
   ATTACK_LEVELS,
   HURTBOX_OFFSETS,
   MELEE_HITBOX_OFFSETS,
+  PLAYER_GUN_MUZZLE_OFFSETS,
   PLAYER_MELEE_REACH_BONUS,
   PROJECTILE_Y_OFFSETS,
   overlappingLevels,
@@ -116,5 +117,16 @@ for (const attack of attacks.filter((item) => item.attackType === 'PUNCH' || ite
   );
 }
 console.log('✓ Player punches and kicks receive the extended reach bonus');
+
+assert.ok(
+  PLAYER_GUN_MUZZLE_OFFSETS.HIGH.y < PLAYER_GUN_MUZZLE_OFFSETS.MID.y &&
+    PLAYER_GUN_MUZZLE_OFFSETS.MID.y < PLAYER_GUN_MUZZLE_OFFSETS.LOW.y,
+  'Gun muzzle heights should run from high to low',
+);
+for (const level of ATTACK_LEVELS) {
+  const muzzle = PLAYER_GUN_MUZZLE_OFFSETS[level];
+  assert.ok(muzzle.x > 0 && muzzle.x < 100, `${level} muzzle should start at the visible barrel tip`);
+}
+console.log('✓ Gun projectiles start at the visible HIGH / MID / LOW muzzle positions');
 
 console.log(`Validated ${attacks.length} attacks across HIGH / MID / LOW regions and both stances.`);
