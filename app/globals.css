@@ -277,6 +277,75 @@ button {
   display: none;
 }
 
+.install-help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(2, 6, 23, .82);
+  backdrop-filter: blur(10px);
+}
+
+.install-help-card {
+  position: relative;
+  width: min(100%, 28rem);
+  border: 1px solid rgba(103, 232, 249, .35);
+  border-radius: 1.25rem;
+  background: linear-gradient(145deg, rgba(15, 23, 42, .98), rgba(8, 47, 73, .96));
+  padding: 1.4rem;
+  color: #cbd5e1;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .5), 0 0 32px rgba(34, 211, 238, .1);
+}
+
+.install-help-card h2 {
+  margin-top: .65rem;
+  color: #ecfeff;
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+.install-help-card p {
+  margin-top: .85rem;
+  font-size: .9rem;
+  line-height: 1.55;
+}
+
+.install-help-card strong {
+  color: #67e8f9;
+}
+
+.install-help-icon {
+  width: 2rem;
+  height: 2rem;
+  color: #67e8f9;
+}
+
+.install-help-close {
+  position: absolute;
+  top: .8rem;
+  right: .8rem;
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .07);
+  color: #e2e8f0;
+}
+
+.install-help-close svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.install-help-note {
+  color: #94a3b8;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: .72rem !important;
+}
+
 @media (orientation: landscape) and (max-height: 600px) {
   .game-shell {
     position: fixed;
@@ -317,15 +386,7 @@ button {
     position: absolute;
     inset: 0;
     z-index: 20;
-    display: grid;
-    grid-template-columns: minmax(8.5rem, 22vw) 1fr minmax(8.5rem, 22vw);
-    align-items: end;
-    gap: 1rem;
-    padding:
-      max(.7rem, env(safe-area-inset-top))
-      max(1rem, env(safe-area-inset-right))
-      max(.7rem, env(safe-area-inset-bottom))
-      max(1rem, env(safe-area-inset-left));
+    display: block;
     pointer-events: none;
     touch-action: none;
     user-select: none;
@@ -334,14 +395,19 @@ button {
   }
 
   .mobile-dpad {
+    position: absolute;
+    bottom: max(.75rem, env(safe-area-inset-bottom));
+    left: max(1rem, env(safe-area-inset-left));
     display: grid;
+    width: clamp(8.5rem, 22vw, 11.5rem);
     grid-template-columns: repeat(3, minmax(2.8rem, 1fr));
     gap: .38rem;
   }
 
   .mobile-dpad button,
   .mobile-attack-pad button,
-  .mobile-start-button {
+  .mobile-start-button,
+  .mobile-install-button {
     pointer-events: auto;
     touch-action: none;
     border: 1px solid rgba(207, 250, 254, .5);
@@ -359,19 +425,34 @@ button {
   }
 
   .mobile-attack-pad {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(3.7rem, 1fr));
-    gap: .55rem;
+    position: absolute;
+    right: max(1rem, env(safe-area-inset-right));
+    bottom: max(.7rem, env(safe-area-inset-bottom));
+    display: block;
+    width: clamp(9rem, 23vw, 12rem);
+    height: 7.4rem;
   }
 
   .mobile-attack-pad button {
+    position: absolute;
     display: grid;
-    min-height: 4.25rem;
+    width: clamp(4rem, 10vw, 4.8rem);
+    height: clamp(4rem, 10vw, 4.8rem);
     place-items: center;
     gap: .08rem;
     border-radius: 999px;
     font-size: .82rem;
     font-weight: 900;
+  }
+
+  .mobile-attack-pad button:nth-child(1) {
+    right: 4.5rem;
+    bottom: 0;
+  }
+
+  .mobile-attack-pad button:nth-child(2) {
+    right: 0;
+    bottom: 2.45rem;
   }
 
   .mobile-attack-pad button.punch {
@@ -421,20 +502,47 @@ button {
     font-weight: 900;
     letter-spacing: .08em;
   }
+
+  .mobile-install-button {
+    position: absolute;
+    top: max(.7rem, env(safe-area-inset-top));
+    right: max(1rem, env(safe-area-inset-right));
+    display: flex;
+    min-height: 2.5rem;
+    align-items: center;
+    gap: .35rem;
+    padding: .4rem .75rem;
+    border-radius: 999px;
+    font-size: .68rem;
+    font-weight: 900;
+  }
+
+  .mobile-install-button svg {
+    width: .9rem;
+    height: .9rem;
+  }
 }
 
 @media (orientation: landscape) and (max-height: 420px) {
-  .mobile-landscape-controls {
-    grid-template-columns: minmax(7.5rem, 20vw) 1fr minmax(7.5rem, 20vw);
-    padding-top: .45rem;
-    padding-bottom: .45rem;
-  }
-
   .mobile-dpad button {
     min-height: 2.55rem;
   }
 
+  .mobile-attack-pad {
+    width: 8.8rem;
+    height: 6.5rem;
+  }
+
   .mobile-attack-pad button {
-    min-height: 3.75rem;
+    width: 3.8rem;
+    height: 3.8rem;
+  }
+
+  .mobile-attack-pad button:nth-child(1) {
+    right: 4rem;
+  }
+
+  .mobile-attack-pad button:nth-child(2) {
+    bottom: 2.1rem;
   }
 }
