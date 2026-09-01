@@ -19,6 +19,11 @@ export const MELEE_HITBOX_OFFSETS = {
   LOW: { y: -70, h: 38 },
 };
 
+export const PLAYER_MELEE_REACH_BONUS = {
+  PUNCH: 28,
+  KICK: 36,
+};
+
 export const PROJECTILE_Y_OFFSETS = {
   HIGH: -270,
   MID: -120,

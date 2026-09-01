@@ -5,6 +5,7 @@ import {
   ATTACK_LEVELS,
   HURTBOX_OFFSETS,
   MELEE_HITBOX_OFFSETS,
+  PLAYER_MELEE_REACH_BONUS,
   PROJECTILE_Y_OFFSETS,
   overlappingLevels,
   translatedRect,
@@ -87,5 +88,33 @@ assert.deepEqual(
   `Upper punch should reach a standing opponent at ${highPunchDistance}px`,
 );
 console.log(`✓ 上段拳 reaches a standing opponent at ${highPunchDistance}px`);
+
+for (const attack of attacks.filter((item) => item.attackType === 'PUNCH' || item.attackType === 'KICK')) {
+  const geometry = MELEE_HITBOX_OFFSETS[attack.attackLevel];
+  const baseExtension = attack.range + (attack.attackType === 'KICK' ? 26 : 10);
+  const bonus = PLAYER_MELEE_REACH_BONUS[attack.attackType];
+  const targetOffset = HURTBOX_OFFSETS.standing[attack.attackLevel];
+  const distance = 22 + baseExtension - targetOffset.x + Math.max(2, bonus - 3);
+  const playerBox = {
+    x: attackerX + 22,
+    y: groundY + geometry.y,
+    w: baseExtension + bonus,
+    h: geometry.h,
+  };
+  const baseBox = { ...playerBox, w: baseExtension };
+  const target = Object.fromEntries(
+    ATTACK_LEVELS.map((level) => [
+      level,
+      translatedRect(attackerX + distance, groundY, HURTBOX_OFFSETS.standing[level]),
+    ]),
+  );
+  assert.deepEqual(overlappingLevels(baseBox, target), [], `${attack.name} baseline should miss at ${distance}px`);
+  assert.deepEqual(
+    overlappingLevels(playerBox, target),
+    [attack.attackLevel],
+    `${attack.name} player bonus should reach at ${distance}px`,
+  );
+}
+console.log('✓ Player punches and kicks receive the extended reach bonus');
 
 console.log(`Validated ${attacks.length} attacks across HIGH / MID / LOW regions and both stances.`);

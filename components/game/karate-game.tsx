@@ -8,6 +8,7 @@ import {
   ATTACK_LEVELS,
   HURTBOX_OFFSETS,
   MELEE_HITBOX_OFFSETS,
+  PLAYER_MELEE_REACH_BONUS,
   PROJECTILE_Y_OFFSETS,
   overlappingLevels,
   rectsOverlap,
@@ -167,13 +168,13 @@ interface World {
 const levelIndex: Record<AttackLevel, number> = { HIGH: 0, MID: 1, LOW: 2 };
 const PLAYER_ACTION_SIZE = 382;
 const PLAYER_REACTION_SIZE = 448;
-const PLAYER_GUARD_SIZE = 476;
+const PLAYER_GUARD_SIZE = 420;
 const PLAYER_GUN_SIZE = 359;
 const PLAYER_GUN_GROUND_OFFSET = 3;
 const ENEMY_ACTION_SIZES = [372, 367, 375] as const;
 const PLAYER_ACTION_GROUND_OFFSETS = [15, 17, 16, 18, 37, 36, 34, 32] as const;
 const PLAYER_REACTION_GROUND_OFFSETS = [35, 34, 35, 37] as const;
-const PLAYER_GUARD_GROUND_OFFSETS = [24, 29, 26, 29] as const;
+const PLAYER_GUARD_GROUND_OFFSETS = [25, 31, 28, 31] as const;
 const ENEMY_ACTION_GROUND_OFFSETS = [
   [0, 0, 0, 0, 15, 14, 23, 16, 43, 43, 43, 38],
   [0, 0, 0, 0, 0, 0, 0, 0, 59, 58, 53, 47],
@@ -351,7 +352,8 @@ class Fighter {
     const { data } = this.attack;
     if (data.attackType === 'GUN') return null;
     const geometry = MELEE_HITBOX_OFFSETS[data.attackLevel];
-    const extension = data.range + (data.attackType === 'KICK' ? 26 : 10);
+    const playerReachBonus = this.id === 'player' ? PLAYER_MELEE_REACH_BONUS[data.attackType] : 0;
+    const extension = data.range + (data.attackType === 'KICK' ? 26 : 10) + playerReachBonus;
     return {
       x: this.direction === 1 ? this.x + 22 : this.x - 22 - extension,
       y: GROUND_Y - this.yOffset + geometry.y,
@@ -371,6 +373,8 @@ class Fighter {
       this.stamina = Math.max(0, this.stamina - data.staminaCost * 0.55);
       this.stunFrames = data.blockStunFrames;
       this.state = `GUARD_${data.attackLevel}`;
+      this.yOffset = 0;
+      this.verticalVelocity = 0;
       this.x += direction * data.knockback * 0.25;
       return;
     }
@@ -381,7 +385,8 @@ class Fighter {
     this.state = `HIT_${data.attackLevel}`;
     this.attack = null;
     this.crouching = false;
-    if (this.yOffset > 0) this.verticalVelocity = Math.min(this.verticalVelocity, -80);
+    this.yOffset = 0;
+    this.verticalVelocity = 0;
     this.x += direction * data.knockback * (counter ? 1.35 : 1);
   }
 }
@@ -833,6 +838,8 @@ function checkKO(world: World) {
   world.matchOver = world.playerRounds >= 2 || world.enemyRounds >= 2;
   loser.state = 'KNOCKDOWN';
   loser.stunFrames = 9999;
+  loser.yOffset = 0;
+  loser.verticalVelocity = 0;
   world.banner = {
     text: world.matchOver
       ? playerWon
@@ -1013,7 +1020,6 @@ function drawGunFrame(
 }
 
 function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fighter) {
-  const baseY = GROUND_Y - fighter.yOffset;
   const isEnemy = fighter.id === 'enemy';
   const phase = fighter.phase;
   const attack = fighter.attack?.data;
@@ -1024,6 +1030,7 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
   const gunFrame = gunFrameFor(fighter);
   const isHitPose = reactionFrame !== null;
   const isGuardPose = guardFrame !== null && guardLevel !== null;
+  const baseY = GROUND_Y - (isHitPose || isGuardPose ? 0 : fighter.yOffset);
   const isCrouchPose = fighter.crouching && !isHitPose && !isGuardPose && !attack;
   const useGunPose = fighter.id === 'player' && world.gunMode && !isHitPose && !isGuardPose && !isCrouchPose && (!attack || attack.attackType === 'GUN');
   const combatSheet = isEnemy ? world.enemySheets[world.aiIndex] : world.actionSheet;
@@ -1387,13 +1394,13 @@ export function KarateGame() {
         fetch('/game-data/attacks.json'),
         fetch('/game-data/ai.json'),
         loadImage('/urban-stage.png'),
-        loadImage('/fio-actions-v2.png'),
-        loadImage('/fio-hit-reactions-v2.png'),
-        loadImage('/enemy-quick-fist-v2.png'),
-        loadImage('/enemy-long-kick-v2.png'),
-        loadImage('/enemy-grappler-v2.png'),
-        loadImage('/fio-guards-v1.png'),
-        loadImage('/fio-gun-actions-v1.png'),
+        loadImage('/fio-actions-v3.png'),
+        loadImage('/fio-hit-reactions-v3.png'),
+        loadImage('/enemy-quick-fist-v3.png'),
+        loadImage('/enemy-long-kick-v3.png'),
+        loadImage('/enemy-grappler-v3.png'),
+        loadImage('/fio-guards-v2.png'),
+        loadImage('/fio-gun-actions-v2.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
       const aiPayload = (await aiResponse.json()) as AIData[] | AIData;
