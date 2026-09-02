@@ -4,7 +4,7 @@ import './globals.css';
 export const metadata: Metadata = {
   metadataBase: new URL('https://neon-karate-city-dojo.chwad6.chatgpt.site'),
   title: 'Neon Karate // 城市道場',
-  description: '以距離、攻擊高度、反擊與拳對拳擒拿為核心的現代都市空手道對戰遊戲。',
+  description: '可切換拳腳與限量手槍、一路迎戰普通敵人直到最終 Boss 的現代都市空手道遊戲。',
   manifest: '/manifest.webmanifest',
   icons: {
     icon: [
@@ -21,7 +21,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: 'Neon Karate // 城市道場',
-    description: '拳快、踢遠、三段攻防。迎戰三種風格對手，掌握反擊與拳對拳擒拿。',
+    description: '選擇男女角色，切換拳腳與手槍，一路迎戰普通敵人直到最終 Boss。',
     images: [{ url: '/og.png', alt: 'Neon Karate 城市道場霓虹都市對戰' }],
     locale: 'zh_TW',
     type: 'website',
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'Neon Karate // 城市道場',
-    description: '拳快、踢遠、三段攻防。迎戰三種風格對手，掌握反擊與拳對拳擒拿。',
+    description: '選擇男女角色，切換拳腳與手槍，一路迎戰普通敵人直到最終 Boss。',
     images: ['/og.png'],
   },
 };

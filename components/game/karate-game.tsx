@@ -1,7 +1,23 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { Bug, Crosshair, Download, Play, RotateCcw, Smartphone, Volume2, VolumeX, X } from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import {
+  Bug,
+  Crosshair,
+  Download,
+  Play,
+  RotateCcw,
+  Smartphone,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -27,6 +43,8 @@ type AttackType = 'PUNCH' | 'KICK' | 'GUN';
 type AttackPhase = 'STARTUP' | 'ACTIVE' | 'RECOVERY' | null;
 type GameStatus = 'LOADING' | 'READY' | 'FIGHTING' | 'KO' | 'PAUSED' | 'ERROR';
 type Direction = -1 | 1;
+type PlayerCharacter = 'fio' | 'kai';
+type JourneyPhase = 'TRAVEL' | 'COMBAT' | 'CLEAR' | 'COMPLETE';
 
 interface AttackData {
   id: string;
@@ -114,11 +132,12 @@ interface Projectile {
   data: AttackData;
 }
 
-interface MatchView {
-  playerRounds: number;
-  enemyRounds: number;
-  roundNumber: number;
-  matchOver: boolean;
+interface JourneyView {
+  encounter: number;
+  total: number;
+  ammo: number;
+  phase: JourneyPhase;
+  complete: boolean;
 }
 
 interface InstallPromptEvent extends Event {
@@ -140,7 +159,8 @@ interface World {
   playerReactionSheet: HTMLImageElement;
   enemySheets: HTMLImageElement[];
   playerGuardSheet: HTMLImageElement;
-  gunSheet: HTMLImageElement;
+  maleActionSheet: HTMLImageElement;
+  gunSheets: Record<PlayerCharacter, HTMLImageElement>;
   status: GameStatus;
   previousStatus: GameStatus;
   keys: Set<string>;
@@ -151,10 +171,15 @@ interface World {
   banner: Banner | null;
   aiDecisionTimer: number;
   aiRetreatTimer: number;
-  playerRounds: number;
-  enemyRounds: number;
-  roundNumber: number;
-  roundResolved: boolean;
+  playerCharacter: PlayerCharacter;
+  encounterIndex: number;
+  encounterTotal: number;
+  journeyPhase: JourneyPhase;
+  phaseTimer: number;
+  stageScroll: number;
+  ammo: number;
+  maxAmmo: number;
+  encounterResolved: boolean;
   matchOver: boolean;
   hitStop: number;
   shake: number;
@@ -162,14 +187,13 @@ interface World {
   showBoxes: boolean;
   sound: boolean;
   gunMode: boolean;
-  secretIndex: number;
   audio: AudioContext | null;
   lastTime: number;
   frameHandle: number;
   onStatus: (status: GameStatus) => void;
   onGunMode: (enabled: boolean) => void;
   onAIChange: (index: number) => void;
-  onMatchChange: (match: MatchView) => void;
+  onJourneyChange: (journey: JourneyView) => void;
 }
 
 const levelIndex: Record<AttackLevel, number> = { HIGH: 0, MID: 1, LOW: 2 };
@@ -181,30 +205,67 @@ const PLAYER_GUN_GROUND_OFFSET = 3;
 const ENEMY_ACTION_SIZES = [372, 367, 375] as const;
 const ENEMY_FRAME_RECTS = [
   [
-    [132, 15, 192, 289], [538, 16, 257, 287], [990, 19, 234, 285], [1370, 106, 298, 196],
-    [105, 326, 264, 253], [518, 320, 279, 260], [963, 412, 279, 161], [1419, 328, 187, 250],
-    [127, 598, 188, 256], [559, 615, 164, 238], [1019, 667, 153, 186], [1365, 753, 304, 105],
+    [132, 15, 192, 289],
+    [538, 16, 257, 287],
+    [990, 19, 234, 285],
+    [1370, 106, 298, 196],
+    [105, 326, 264, 253],
+    [518, 320, 279, 260],
+    [963, 412, 279, 161],
+    [1419, 328, 187, 250],
+    [127, 598, 188, 256],
+    [559, 615, 164, 238],
+    [1019, 667, 153, 186],
+    [1365, 753, 304, 105],
   ],
   [
-    [112, 11, 201, 331], [449, 13, 321, 327], [895, 25, 305, 315], [1260, 124, 331, 218],
-    [94, 358, 276, 294], [468, 353, 286, 298], [869, 454, 357, 191], [1359, 342, 171, 306],
-    [56, 662, 267, 245], [454, 676, 196, 232], [912, 708, 183, 202], [1227, 792, 415, 125],
+    [112, 11, 201, 331],
+    [449, 13, 321, 327],
+    [895, 25, 305, 315],
+    [1260, 124, 331, 218],
+    [94, 358, 276, 294],
+    [468, 353, 286, 298],
+    [869, 454, 357, 191],
+    [1359, 342, 171, 306],
+    [56, 662, 267, 245],
+    [454, 676, 196, 232],
+    [912, 708, 183, 202],
+    [1227, 792, 415, 125],
   ],
   [
-    [141, 17, 214, 317], [543, 17, 310, 315], [942, 32, 297, 302], [1377, 134, 278, 198],
-    [112, 343, 260, 264], [531, 337, 265, 272], [912, 421, 333, 188], [1365, 377, 278, 234],
-    [154, 627, 224, 229], [558, 644, 200, 212], [937, 665, 297, 190], [1323, 729, 353, 128],
+    [141, 17, 214, 317],
+    [543, 17, 310, 315],
+    [942, 32, 297, 302],
+    [1377, 134, 278, 198],
+    [112, 343, 260, 264],
+    [531, 337, 265, 272],
+    [912, 421, 333, 188],
+    [1365, 377, 278, 234],
+    [154, 627, 224, 229],
+    [558, 644, 200, 212],
+    [937, 665, 297, 190],
+    [1323, 729, 353, 128],
   ],
 ] as const;
 const PLAYER_ACTION_GROUND_OFFSETS = [15, 17, 16, 18, 37, 36, 34, 32] as const;
 const PLAYER_REACTION_GROUND_OFFSETS = [35, 34, 35, 37] as const;
 const PLAYER_GUARD_GROUND_OFFSETS = [25, 31, 28, 31] as const;
-const attackInputByLevel: Record<'PUNCH' | 'KICK' | 'GUN', Record<AttackLevel, string>> = {
+const attackInputByLevel: Record<
+  'PUNCH' | 'KICK' | 'GUN',
+  Record<AttackLevel, string>
+> = {
   PUNCH: { HIGH: 'q', MID: 'a', LOW: 'z' },
   KICK: { HIGH: 'w', MID: 's', LOW: 'x' },
   GUN: { HIGH: 'q', MID: 'a', LOW: 'z' },
 };
-const secretSequence = ['arrowup', 'arrowup', 'arrowdown', 'arrowdown', 'arrowleft', 'arrowright', 'arrowleft', 'arrowright', 'q', 'w'];
+const ENCOUNTER_TOTAL = 6;
+const ENCOUNTER_HP = [30, 34, 40, 46, 54, 100] as const;
+const FIO_ENEMY_ROSTER = [0, 1, 0, 1, 0, 2] as const;
+const KAI_ENEMY_ROSTER = [1, 2, 1, 2, 1, 2] as const;
+const PLAYER_NAMES: Record<PlayerCharacter, string> = {
+  fio: 'FIO // 白閃',
+  kai: 'KAI // 瞬拳',
+};
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -221,7 +282,7 @@ function loadImage(src: string) {
 
 class Fighter {
   readonly id: 'player' | 'enemy';
-  readonly displayName: string;
+  displayName: string;
   x: number;
   direction: Direction;
   hp = 100;
@@ -232,7 +293,12 @@ class Fighter {
   attack: AttackRuntime | null = null;
   stunFrames = 0;
 
-  constructor(id: 'player' | 'enemy', displayName: string, x: number, direction: Direction) {
+  constructor(
+    id: 'player' | 'enemy',
+    displayName: string,
+    x: number,
+    direction: Direction,
+  ) {
     this.id = id;
     this.displayName = displayName;
     this.x = x;
@@ -252,7 +318,12 @@ class Fighter {
   }
 
   get busy() {
-    return Boolean(this.attack) || this.stunFrames > 0 || this.state === 'GRAPPLE' || this.state === 'KNOCKDOWN';
+    return (
+      Boolean(this.attack) ||
+      this.stunFrames > 0 ||
+      this.state === 'GRAPPLE' ||
+      this.state === 'KNOCKDOWN'
+    );
   }
 
   get phase(): AttackPhase {
@@ -323,14 +394,18 @@ class Fighter {
     const speed = this.moveIntent > 0 ? 180 : 155;
     if (!this.crouching && this.moveIntent !== 0) {
       this.x += this.moveIntent * speed * (exhausted ? 0.9 : 1) * dt;
-      this.state = this.moveIntent === this.direction ? 'MOVE_FORWARD' : 'MOVE_BACKWARD';
+      this.state =
+        this.moveIntent === this.direction ? 'MOVE_FORWARD' : 'MOVE_BACKWARD';
     } else if (this.crouching) {
       this.state = 'CROUCH';
     } else {
       this.state = 'IDLE';
     }
 
-    this.stamina = Math.min(100, this.stamina + (this.crouching ? 15 : 22) * dt);
+    this.stamina = Math.min(
+      100,
+      this.stamina + (this.crouching ? 15 : 22) * dt,
+    );
   }
 
   hurtboxes(): Record<AttackLevel, Rect> {
@@ -348,8 +423,10 @@ class Fighter {
     const { data } = this.attack;
     if (data.attackType === 'GUN') return null;
     const geometry = MELEE_HITBOX_OFFSETS[data.attackLevel];
-    const playerReachBonus = this.id === 'player' ? PLAYER_MELEE_REACH_BONUS[data.attackType] : 0;
-    const extension = data.range + (data.attackType === 'KICK' ? 26 : 10) + playerReachBonus;
+    const playerReachBonus =
+      this.id === 'player' ? PLAYER_MELEE_REACH_BONUS[data.attackType] : 0;
+    const extension =
+      data.range + (data.attackType === 'KICK' ? 26 : 10) + playerReachBonus;
     return {
       x: this.direction === 1 ? this.x + 22 : this.x - 22 - extension,
       y: GROUND_Y + geometry.y,
@@ -363,9 +440,17 @@ class Fighter {
     return this.crouching ? level !== 'HIGH' : level !== 'LOW';
   }
 
-  receiveHit(data: AttackData, direction: Direction, counter: boolean, guarded: boolean) {
+  receiveHit(
+    data: AttackData,
+    direction: Direction,
+    counter: boolean,
+    guarded: boolean,
+  ) {
     if (guarded) {
-      this.hp = Math.max(0, this.hp - Math.max(1, Math.round(data.damage * 0.18)));
+      this.hp = Math.max(
+        0,
+        this.hp - Math.max(1, Math.round(data.damage * 0.18)),
+      );
       this.stamina = Math.max(0, this.stamina - data.staminaCost * 0.55);
       this.stunFrames = data.blockStunFrames;
       this.state = `GUARD_${data.attackLevel}`;
@@ -395,14 +480,22 @@ function roundedRect(
   ctx.roundRect(x, y, w, h, radius);
 }
 
-function playTone(world: World, frequency: number, duration = 0.06, gain = 0.04) {
+function playTone(
+  world: World,
+  frequency: number,
+  duration = 0.06,
+  gain = 0.04,
+) {
   if (!world.sound || !world.audio) return;
   const oscillator = world.audio.createOscillator();
   const volume = world.audio.createGain();
   oscillator.type = 'square';
   oscillator.frequency.setValueAtTime(frequency, world.audio.currentTime);
   volume.gain.setValueAtTime(gain, world.audio.currentTime);
-  volume.gain.exponentialRampToValueAtTime(0.0001, world.audio.currentTime + duration);
+  volume.gain.exponentialRampToValueAtTime(
+    0.0001,
+    world.audio.currentTime + duration,
+  );
   oscillator.connect(volume).connect(world.audio.destination);
   oscillator.start();
   oscillator.stop(world.audio.currentTime + duration);
@@ -414,59 +507,101 @@ function setStatus(world: World, status: GameStatus) {
   world.onStatus(status);
 }
 
-function enableGunMode(world: World) {
-  if (world.gunMode) return;
-  if (!world.audio) world.audio = new AudioContext();
-  world.gunMode = true;
-  world.secretIndex = 0;
-  world.onGunMode(true);
-  world.banner = { text: 'SECRET MODE', subtext: '↑ / ↓ 選段位 · Q 射擊 · W 踢擊', color: '#22d3ee', life: 2.4 };
-  playTone(world, 520, 0.08, 0.04);
-  window.setTimeout(() => playTone(world, 680, 0.08, 0.04), 90);
-  window.setTimeout(() => playTone(world, 920, 0.14, 0.05), 180);
-}
-
-function trackSecretInput(world: World, key: string) {
-  if (world.status !== 'READY' || world.gunMode) return;
-  if (key === secretSequence[world.secretIndex]) {
-    world.secretIndex += 1;
-    if (world.secretIndex === secretSequence.length) enableGunMode(world);
-    return;
-  }
-  world.secretIndex = key === secretSequence[0] ? 1 : 0;
-}
-
-function emitMatch(world: World) {
-  world.onMatchChange({
-    playerRounds: world.playerRounds,
-    enemyRounds: world.enemyRounds,
-    roundNumber: world.roundNumber,
-    matchOver: world.matchOver,
+function emitJourney(world: World) {
+  world.onJourneyChange({
+    encounter: Math.min(world.encounterIndex + 1, world.encounterTotal),
+    total: world.encounterTotal,
+    ammo: world.ammo,
+    phase: world.journeyPhase,
+    complete: world.matchOver,
   });
 }
 
-function resetWorld(world: World, resetMatch = false) {
-  if (resetMatch) {
-    world.playerRounds = 0;
-    world.enemyRounds = 0;
-    world.roundNumber = 1;
-    world.matchOver = false;
-  } else if (world.roundResolved) {
-    world.roundNumber += 1;
+function setGunMode(world: World, enabled: boolean) {
+  if (enabled && world.ammo <= 0) {
+    world.gunMode = false;
+    world.onGunMode(false);
+    world.banner = {
+      text: 'NO AMMO',
+      subtext: '射擊鍵已自動改回拳擊',
+      color: '#fbbf24',
+      life: 1.1,
+    };
+    return;
   }
-  world.roundResolved = false;
+  world.gunMode = enabled;
+  world.onGunMode(enabled);
+  world.banner = {
+    text: enabled ? 'WEAPON READY' : 'BARE HANDS',
+    subtext: enabled ? `Q 射擊 · 剩餘 ${world.ammo} 發` : 'Q 拳 · W 腳',
+    color: enabled ? '#22d3ee' : '#fbbf24',
+    life: 0.85,
+  };
+  playTone(world, enabled ? 620 : 330, 0.06, 0.03);
+}
+
+function toggleWeapon(world: World) {
+  setGunMode(world, !world.gunMode);
+}
+
+function encounterAIIndex(world: World) {
+  const roster =
+    world.playerCharacter === 'kai' ? KAI_ENEMY_ROSTER : FIO_ENEMY_ROSTER;
+  return roster[world.encounterIndex] ?? roster[roster.length - 1];
+}
+
+function beginEncounter(world: World) {
+  const nextIndex = encounterAIIndex(world);
+  const nextAI = world.ais[nextIndex] ?? world.ais[0];
+  if (!nextAI) return;
+  world.aiIndex = nextIndex;
+  world.ai = nextAI;
+  world.onAIChange(nextIndex);
+  world.player.x = 350;
+  world.player.direction = 1;
+  world.player.moveIntent = 0;
+  world.player.state = 'IDLE';
+  world.enemy.reset(930, -1);
+  world.enemy.hp = ENCOUNTER_HP[world.encounterIndex] ?? 100;
+  world.journeyPhase = 'COMBAT';
+  world.encounterResolved = false;
+  world.aiDecisionTimer = 0.65;
+  world.aiRetreatTimer = 0;
+  const boss = world.encounterIndex === world.encounterTotal - 1;
+  world.banner = {
+    text: boss ? 'FINAL BOSS' : `ENEMY ${world.encounterIndex + 1}`,
+    subtext: boss
+      ? `${nextAI.name} // 決戰`
+      : `${nextAI.name} // HP ${world.enemy.hp}`,
+    color: boss ? '#fb7185' : '#ffe08a',
+    life: 1.15,
+  };
+  emitJourney(world);
+  playTone(world, boss ? 120 : 420, boss ? 0.22 : 0.1, boss ? 0.055 : 0.03);
+}
+
+function resetWorld(world: World) {
+  world.encounterIndex = 0;
+  world.encounterResolved = false;
+  world.matchOver = false;
+  world.journeyPhase = 'TRAVEL';
+  world.phaseTimer = 1.75;
+  world.stageScroll = 0;
+  world.ammo = world.maxAmmo;
+  world.gunMode = false;
+  world.onGunMode(false);
+  world.player.displayName = PLAYER_NAMES[world.playerCharacter];
   world.player.reset(350, 1);
   world.enemy.reset(930, -1);
+  world.enemy.hp = 0;
   world.grapple = null;
   world.projectiles = [];
   world.impacts = [];
   world.banner = {
-    text: world.gunMode ? `SECRET ROUND ${world.roundNumber}` : `ROUND ${world.roundNumber}`,
-    subtext: world.gunMode
-      ? `Q = SHOT · W = KICK // ${world.playerRounds}–${world.enemyRounds}`
-      : `${world.ai.archetype} // FIRST TO 2`,
-    color: world.gunMode ? '#22d3ee' : '#ffe08a',
-    life: 1.2,
+    text: 'MOVE OUT',
+    subtext: `${PLAYER_NAMES[world.playerCharacter]} // 前往最終決戰`,
+    color: '#67e8f9',
+    life: 1.1,
   };
   world.aiDecisionTimer = 0.45;
   world.aiRetreatTimer = 0;
@@ -474,34 +609,28 @@ function resetWorld(world: World, resetMatch = false) {
   world.shake = 0;
   world.keys.clear();
   world.justPressed.clear();
-  emitMatch(world);
+  emitJourney(world);
   setStatus(world, 'FIGHTING');
   playTone(world, 420, 0.12, 0.035);
 }
 
-function selectAI(world: World, index: number) {
+function selectPlayerCharacter(world: World, character: PlayerCharacter) {
   if (world.status === 'FIGHTING' || world.status === 'PAUSED') return;
-  const nextIndex = clamp(index, 0, world.ais.length - 1);
-  const nextAI = world.ais[nextIndex];
-  if (!nextAI) return;
-  world.aiIndex = nextIndex;
-  world.ai = nextAI;
+  world.playerCharacter = character;
+  world.player.displayName = PLAYER_NAMES[character];
   world.player.reset(350, 1);
   world.enemy.reset(930, -1);
-  world.grapple = null;
-  world.projectiles = [];
-  world.impacts = [];
-  world.banner = null;
-  world.secretIndex = 0;
-  world.playerRounds = 0;
-  world.enemyRounds = 0;
-  world.roundNumber = 1;
-  world.roundResolved = false;
+  world.enemy.hp = 0;
+  world.journeyPhase = 'TRAVEL';
+  world.encounterIndex = 0;
+  world.ammo = world.maxAmmo;
   world.matchOver = false;
-  world.onAIChange(nextIndex);
-  emitMatch(world);
+  world.gunMode = false;
+  world.onGunMode(false);
+  world.banner = null;
+  emitJourney(world);
   setStatus(world, 'READY');
-  playTone(world, 320 + nextIndex * 90, 0.08, 0.025);
+  playTone(world, character === 'fio' ? 410 : 310, 0.08, 0.025);
 }
 
 function beginGrapple(world: World) {
@@ -516,7 +645,12 @@ function beginGrapple(world: World) {
     playerChoice: null,
     aiChoice: Math.random() > 0.5 ? 1 : -1,
   };
-  world.banner = { text: 'GRAPPLE!', subtext: '立刻按 ← 或 →', color: '#fbbf24', life: 0.7 };
+  world.banner = {
+    text: 'GRAPPLE!',
+    subtext: '立刻按 ← 或 →',
+    color: '#fbbf24',
+    life: 0.7,
+  };
   world.hitStop = 0.09;
   playTone(world, 190, 0.1, 0.05);
 }
@@ -526,13 +660,17 @@ function resolveGrapple(world: World) {
   const grapple = world.grapple;
   const playerTiming = grapple.playerChoice ? 14 + grapple.timer * 28 : -12;
   const directionRead = grapple.playerChoice !== grapple.aiChoice ? 9 : -4;
-  const playerPower = world.player.stamina * 0.035 + playerTiming + directionRead + Math.random() * 1.5;
+  const playerPower =
+    world.player.stamina * 0.035 +
+    playerTiming +
+    directionRead +
+    Math.random() * 1.5;
   const enemyPower = world.enemy.stamina * 0.035 + 15 + Math.random() * 1.5;
   const playerWins = playerPower >= enemyPower;
   const winner = playerWins ? world.player : world.enemy;
   const loser = playerWins ? world.enemy : world.player;
   const throwDirection: Direction = playerWins
-    ? grapple.playerChoice ?? winner.direction
+    ? (grapple.playerChoice ?? winner.direction)
     : grapple.aiChoice;
 
   loser.hp = Math.max(0, loser.hp - 20);
@@ -549,7 +687,12 @@ function resolveGrapple(world: World) {
     color: playerWins ? '#67e8f9' : '#fb7185',
     life: 1,
   };
-  world.impacts.push({ x: loser.x, y: GROUND_Y - 30, life: 0.55, color: '#fbbf24' });
+  world.impacts.push({
+    x: loser.x,
+    y: GROUND_Y - 30,
+    life: 0.55,
+    color: '#fbbf24',
+  });
   world.hitStop = 0.13;
   world.shake = 12;
   world.grapple = null;
@@ -557,19 +700,32 @@ function resolveGrapple(world: World) {
 }
 
 function tryGrapple(world: World) {
+  if (world.encounterIndex < world.encounterTotal - 1) return false;
   const playerAttack = world.player.attack;
   const enemyAttack = world.enemy.attack;
   if (!playerAttack || !enemyAttack) return false;
-  if (world.player.phase !== 'ACTIVE' || world.enemy.phase !== 'ACTIVE') return false;
-  if (playerAttack.data.attackType !== 'PUNCH' || enemyAttack.data.attackType !== 'PUNCH') return false;
-  if (!playerAttack.data.canTriggerGrapple || !enemyAttack.data.canTriggerGrapple) return false;
+  if (world.player.phase !== 'ACTIVE' || world.enemy.phase !== 'ACTIVE')
+    return false;
+  if (
+    playerAttack.data.attackType !== 'PUNCH' ||
+    enemyAttack.data.attackType !== 'PUNCH'
+  )
+    return false;
+  if (
+    !playerAttack.data.canTriggerGrapple ||
+    !enemyAttack.data.canTriggerGrapple
+  )
+    return false;
   const levelGap = Math.abs(
-    levelIndex[playerAttack.data.attackLevel] - levelIndex[enemyAttack.data.attackLevel],
+    levelIndex[playerAttack.data.attackLevel] -
+      levelIndex[enemyAttack.data.attackLevel],
   );
-  if (levelGap > 1 || Math.abs(world.player.x - world.enemy.x) > 128) return false;
+  if (levelGap > 1 || Math.abs(world.player.x - world.enemy.x) > 128)
+    return false;
   const playerBox = world.player.attackBox();
   const enemyBox = world.enemy.attackBox();
-  if (!playerBox || !enemyBox || !rectsOverlap(playerBox, enemyBox)) return false;
+  if (!playerBox || !enemyBox || !rectsOverlap(playerBox, enemyBox))
+    return false;
   beginGrapple(world);
   return true;
 }
@@ -594,28 +750,58 @@ function resolveAttack(world: World, attacker: Fighter, defender: Fighter) {
     x: attacker.direction === 1 ? attackBox.x + attackBox.w : attackBox.x,
     y: impactY,
     life: guarded ? 0.22 : 0.38,
-    color: guarded ? '#7dd3fc' : runtime.data.attackType === 'KICK' ? '#fb7185' : '#fbbf24',
+    color: guarded
+      ? '#7dd3fc'
+      : runtime.data.attackType === 'KICK'
+        ? '#fb7185'
+        : '#fbbf24',
   });
-  world.hitStop = guarded ? 0.035 : counter ? 0.085 : runtime.data.attackType === 'KICK' ? 0.065 : 0.04;
-  world.shake = guarded ? 2 : counter ? 9 : runtime.data.attackType === 'KICK' ? 6 : 4;
+  world.hitStop = guarded
+    ? 0.035
+    : counter
+      ? 0.085
+      : runtime.data.attackType === 'KICK'
+        ? 0.065
+        : 0.04;
+  world.shake = guarded
+    ? 2
+    : counter
+      ? 9
+      : runtime.data.attackType === 'KICK'
+        ? 6
+        : 4;
   if (counter) playTone(world, 760, 0.09, 0.055);
   else if (guarded) playTone(world, 260, 0.05, 0.025);
   else {
-    playTone(world, runtime.data.attackType === 'KICK' ? 120 : 180, 0.065, 0.04);
+    playTone(
+      world,
+      runtime.data.attackType === 'KICK' ? 120 : 180,
+      0.065,
+      0.04,
+    );
   }
 }
 
 function chooseAIAttack(world: World, distance: number) {
   const ai = world.ai;
+  const progress = world.encounterIndex / Math.max(1, world.encounterTotal - 1);
+  if (world.encounterIndex < 2) {
+    return world.attacks.find(
+      (attack) => attack.attackType === 'PUNCH' && attack.attackLevel === 'MID',
+    );
+  }
   const playerAttack = world.player.attack?.data;
   if (
     playerAttack?.attackType === 'PUNCH' &&
     (world.player.phase === 'STARTUP' || world.player.phase === 'ACTIVE') &&
     distance < 132 &&
+    progress > 0.65 &&
     Math.random() < ai.grappleRate
   ) {
     const matchingPunch = world.attacks.find(
-      (attack) => attack.attackType === 'PUNCH' && attack.attackLevel === playerAttack.attackLevel,
+      (attack) =>
+        attack.attackType === 'PUNCH' &&
+        attack.attackLevel === playerAttack.attackLevel,
     );
     if (matchingPunch) return matchingPunch;
   }
@@ -624,7 +810,8 @@ function chooseAIAttack(world: World, distance: number) {
     const counterPunch = world.attacks.find(
       (attack) => attack.attackType === 'PUNCH' && attack.attackLevel === 'MID',
     );
-    if (counterPunch && distance <= counterPunch.range + 78) return counterPunch;
+    if (counterPunch && distance <= counterPunch.range + 78)
+      return counterPunch;
   }
 
   const wantsKick = Math.random() < ai.kickRate;
@@ -638,7 +825,9 @@ function chooseAIAttack(world: World, distance: number) {
       : roll < ai.highAttackRate + ai.midAttackRate
         ? 'MID'
         : 'LOW';
-  return candidates.find((attack) => attack.attackLevel === level) ?? candidates[1];
+  return (
+    candidates.find((attack) => attack.attackLevel === level) ?? candidates[1]
+  );
 }
 
 function updateAI(world: World, dt: number) {
@@ -649,10 +838,11 @@ function updateAI(world: World, dt: number) {
     return;
   }
   enemy.crouching = false;
-  const incoming = world.projectiles.find((projectile) =>
-    projectile.owner === 'player' &&
-    Math.abs(projectile.x - enemy.x) < 430 &&
-    Math.sign(projectile.velocityX) === Math.sign(enemy.x - projectile.x),
+  const incoming = world.projectiles.find(
+    (projectile) =>
+      projectile.owner === 'player' &&
+      Math.abs(projectile.x - enemy.x) < 430 &&
+      Math.sign(projectile.velocityX) === Math.sign(enemy.x - projectile.x),
   );
   if (incoming) {
     if (incoming.data.attackLevel === 'HIGH') {
@@ -676,7 +866,8 @@ function updateAI(world: World, dt: number) {
   } else if (distance > world.ai.preferredMaxRange) {
     enemy.moveIntent = enemy.direction;
   } else if (distance < world.ai.preferredMinRange) {
-    enemy.moveIntent = Math.random() < world.ai.retreatRate ? -enemy.direction : 0;
+    enemy.moveIntent =
+      Math.random() < world.ai.retreatRate ? -enemy.direction : 0;
   } else {
     enemy.moveIntent = 0;
   }
@@ -690,7 +881,9 @@ function updateAI(world: World, dt: number) {
     Math.random() < world.ai.grappleRate * 0.18
   ) {
     const matchingPunch = world.attacks.find(
-      (attack) => attack.attackType === 'PUNCH' && attack.attackLevel === incomingPunch.attackLevel,
+      (attack) =>
+        attack.attackType === 'PUNCH' &&
+        attack.attackLevel === incomingPunch.attackLevel,
     );
     if (matchingPunch && enemy.beginAttack(matchingPunch)) {
       enemy.moveIntent = 0;
@@ -700,7 +893,11 @@ function updateAI(world: World, dt: number) {
   }
 
   if (world.aiDecisionTimer > 0) return;
-  world.aiDecisionTimer = (world.ai.reactionFrames / FPS) * (0.75 + Math.random() * 0.55);
+  const progress = world.encounterIndex / Math.max(1, world.encounterTotal - 1);
+  world.aiDecisionTimer =
+    (world.ai.reactionFrames / FPS) *
+    (1.35 - progress * 0.5) *
+    (0.85 + Math.random() * 0.55);
   const playerAttack = player.attack?.data;
   if (
     playerAttack &&
@@ -720,15 +917,22 @@ function updateAI(world: World, dt: number) {
     }
     return;
   }
-  if (distance > world.ai.preferredMaxRange + 72 || Math.random() > world.ai.aggression) return;
+  const encounterAggression = world.ai.aggression * (0.42 + progress * 0.58);
+  if (
+    distance > world.ai.preferredMaxRange + 72 ||
+    Math.random() > encounterAggression
+  )
+    return;
 
   const attack = chooseAIAttack(world, distance);
   if (!attack) return;
-  const practicalRange = attack.range + (attack.attackType === 'KICK' ? 88 : 78);
+  const practicalRange =
+    attack.range + (attack.attackType === 'KICK' ? 88 : 78);
   if (distance <= practicalRange) {
     enemy.beginAttack(attack);
     playTone(world, attack.attackType === 'KICK' ? 145 : 220, 0.035, 0.012);
-    if (attack.attackType === 'KICK' && Math.random() < world.ai.retreatRate) world.aiRetreatTimer = 0.3;
+    if (attack.attackType === 'KICK' && Math.random() < world.ai.retreatRate)
+      world.aiRetreatTimer = 0.3;
   }
 }
 
@@ -744,13 +948,30 @@ function handlePlayer(world: World) {
   for (const input of ['q', 'w']) {
     if (!world.justPressed.has(input)) continue;
     const level: AttackLevel = up === down ? 'MID' : up ? 'HIGH' : 'LOW';
-    const type = input === 'q' ? (world.gunMode ? 'GUN' : 'PUNCH') : 'KICK';
+    if (input === 'q' && world.gunMode && world.ammo <= 0)
+      setGunMode(world, false);
+    const type =
+      input === 'q'
+        ? world.gunMode && world.ammo > 0
+          ? 'GUN'
+          : 'PUNCH'
+        : 'KICK';
     const mappedInput = attackInputByLevel[type][level];
-    const attack = type === 'GUN'
-      ? world.gunAttackByInput.get(mappedInput)
-      : world.meleeAttackByInput.get(mappedInput);
+    const attack =
+      type === 'GUN'
+        ? world.gunAttackByInput.get(mappedInput)
+        : world.meleeAttackByInput.get(mappedInput);
     if (attack && player.beginAttack(attack)) {
-      playTone(world, attack.attackType === 'GUN' ? 430 : attack.attackType === 'KICK' ? 150 : 240, 0.04, 0.016);
+      playTone(
+        world,
+        attack.attackType === 'GUN'
+          ? 430
+          : attack.attackType === 'KICK'
+            ? 150
+            : 240,
+        0.04,
+        0.016,
+      );
     }
   }
 }
@@ -764,13 +985,30 @@ function spawnProjectiles(world: World) {
       fighter.phase !== 'ACTIVE' ||
       runtime.data.attackType !== 'GUN' ||
       !runtime.data.projectile
-    ) continue;
+    )
+      continue;
 
     runtime.hitResolved = true;
+    if (fighter.id === 'player') {
+      if (world.ammo <= 0) continue;
+      world.ammo -= 1;
+      if (world.ammo === 0) {
+        world.gunMode = false;
+        world.onGunMode(false);
+        world.banner = {
+          text: 'MAGAZINE EMPTY',
+          subtext: 'Q 已自動改為拳擊',
+          color: '#fbbf24',
+          life: 1.05,
+        };
+      }
+      emitJourney(world);
+    }
     const speed = runtime.data.projectileSpeed ?? 1400;
-    const muzzle = fighter.id === 'player'
-      ? PLAYER_GUN_MUZZLE_OFFSETS[runtime.data.attackLevel]
-      : { x: 96, y: PROJECTILE_Y_OFFSETS[runtime.data.attackLevel] };
+    const muzzle =
+      fighter.id === 'player'
+        ? PLAYER_GUN_MUZZLE_OFFSETS[runtime.data.attackLevel]
+        : { x: 96, y: PROJECTILE_Y_OFFSETS[runtime.data.attackLevel] };
     const startX = fighter.x + fighter.direction * muzzle.x;
     world.projectiles.push({
       owner: fighter.id,
@@ -801,8 +1039,11 @@ function updateProjectiles(world: World, dt: number) {
       h: 16,
     };
     const targetBox = defender.hurtboxes()[projectile.data.attackLevel];
-    const crossedTarget = collider.x < targetBox.x + targetBox.w && collider.x + collider.w > targetBox.x;
-    const evadedByStance = projectile.data.attackLevel === 'HIGH' && defender.crouching;
+    const crossedTarget =
+      collider.x < targetBox.x + targetBox.w &&
+      collider.x + collider.w > targetBox.x;
+    const evadedByStance =
+      projectile.data.attackLevel === 'HIGH' && defender.crouching;
     if (!crossedTarget || evadedByStance) continue;
 
     const direction = Math.sign(projectile.velocityX) as Direction;
@@ -819,41 +1060,55 @@ function updateProjectiles(world: World, dt: number) {
     world.shake = guarded ? 3 : 8;
     playTone(world, guarded ? 260 : 110, 0.07, 0.045);
   }
-  world.projectiles = world.projectiles.filter((projectile) =>
-    projectile.lifetime > 0 && projectile.x > -60 && projectile.x < WIDTH + 60,
+  world.projectiles = world.projectiles.filter(
+    (projectile) =>
+      projectile.lifetime > 0 &&
+      projectile.x > -60 &&
+      projectile.x < WIDTH + 60,
   );
 }
 
 function checkKO(world: World) {
-  if (world.roundResolved || (world.player.hp > 0 && world.enemy.hp > 0)) return;
+  if (world.encounterResolved || (world.player.hp > 0 && world.enemy.hp > 0))
+    return;
   const playerWon = world.enemy.hp <= 0;
   const loser = playerWon ? world.enemy : world.player;
-  world.roundResolved = true;
-  if (playerWon) world.playerRounds += 1;
-  else world.enemyRounds += 1;
-  world.matchOver = world.playerRounds >= 2 || world.enemyRounds >= 2;
+  world.encounterResolved = true;
   loser.state = 'KNOCKDOWN';
   loser.stunFrames = 9999;
-  world.banner = {
-    text: world.matchOver
-      ? playerWon
-        ? 'MATCH WON'
-        : 'MATCH LOST'
-      : playerWon
-        ? `ROUND ${world.roundNumber} WON`
-        : `ROUND ${world.roundNumber} LOST`,
-    subtext: world.matchOver
-      ? `FINAL ${world.playerRounds}–${world.enemyRounds} // 按 R 再戰`
-      : `SCORE ${world.playerRounds}–${world.enemyRounds} // 按 R 下一回合`,
-    color: playerWon ? '#67e8f9' : '#fb7185',
-    life: 999,
-  };
-  emitMatch(world);
-  setStatus(world, 'KO');
+  world.projectiles = [];
   world.hitStop = 0;
   world.shake = 0;
   world.impacts = [];
-  playTone(world, playerWon ? 520 : 96, 0.3, 0.06);
+
+  if (!playerWon) {
+    world.matchOver = true;
+    world.journeyPhase = 'COMPLETE';
+    world.banner = {
+      text: 'JOURNEY ENDED',
+      subtext: `抵達第 ${world.encounterIndex + 1} 戰 // 按 R 重新出發`,
+      color: '#fb7185',
+      life: 999,
+    };
+    emitJourney(world);
+    setStatus(world, 'KO');
+    playTone(world, 96, 0.3, 0.06);
+    return;
+  }
+
+  const bossDefeated = world.encounterIndex >= world.encounterTotal - 1;
+  world.matchOver = bossDefeated;
+  world.journeyPhase = bossDefeated ? 'COMPLETE' : 'CLEAR';
+  world.phaseTimer = 1.25;
+  world.banner = {
+    text: bossDefeated ? 'BOSS DEFEATED' : 'ENEMY DOWN',
+    subtext: bossDefeated ? '城市道場制霸 // 按 R 再闖一次' : '繼續前進',
+    color: '#67e8f9',
+    life: bossDefeated ? 999 : 1.15,
+  };
+  emitJourney(world);
+  if (bossDefeated) setStatus(world, 'KO');
+  playTone(world, bossDefeated ? 620 : 520, bossDefeated ? 0.35 : 0.2, 0.055);
 }
 
 function updateWorld(world: World, dt: number) {
@@ -871,6 +1126,48 @@ function updateWorld(world: World, dt: number) {
     .filter((impact) => impact.life > 0);
   world.shake = Math.max(0, world.shake - 28 * dt);
 
+  if (world.journeyPhase === 'TRAVEL') {
+    world.phaseTimer -= dt;
+    world.stageScroll += 105 * dt;
+    world.player.direction = 1;
+    world.player.crouching = false;
+    world.player.moveIntent = 1;
+    world.player.update(dt);
+    world.player.x = 350 + Math.sin(world.stageScroll * 0.025) * 10;
+    if (world.phaseTimer <= 0) beginEncounter(world);
+    world.justPressed.clear();
+    return;
+  }
+
+  if (world.journeyPhase === 'CLEAR') {
+    world.phaseTimer -= dt;
+    world.player.moveIntent = 0;
+    world.player.update(dt);
+    if (world.phaseTimer <= 0) {
+      world.encounterIndex += 1;
+      world.player.hp = Math.min(100, world.player.hp + 14);
+      world.player.stamina = 100;
+      world.enemy.hp = 0;
+      world.journeyPhase = 'TRAVEL';
+      world.phaseTimer = 1.65;
+      world.encounterResolved = false;
+      world.banner = {
+        text: 'ADVANCE',
+        subtext: `下一戰 ${world.encounterIndex + 1}/${world.encounterTotal}`,
+        color: '#67e8f9',
+        life: 0.85,
+      };
+      emitJourney(world);
+    }
+    world.justPressed.clear();
+    return;
+  }
+
+  if (world.journeyPhase !== 'COMBAT') {
+    world.justPressed.clear();
+    return;
+  }
+
   world.player.direction = world.player.x <= world.enemy.x ? 1 : -1;
   world.enemy.direction = world.enemy.x <= world.player.x ? 1 : -1;
 
@@ -878,7 +1175,8 @@ function updateWorld(world: World, dt: number) {
     world.grapple.timer -= dt;
     if (world.justPressed.has('arrowleft')) world.grapple.playerChoice = -1;
     if (world.justPressed.has('arrowright')) world.grapple.playerChoice = 1;
-    if (world.grapple.playerChoice || world.grapple.timer <= 0) resolveGrapple(world);
+    if (world.grapple.playerChoice || world.grapple.timer <= 0)
+      resolveGrapple(world);
     world.justPressed.clear();
     checkKO(world);
     return;
@@ -890,8 +1188,16 @@ function updateWorld(world: World, dt: number) {
   world.enemy.update(dt);
   updateProjectiles(world, dt);
 
-  world.player.x = clamp(world.player.x, FIGHTER_STAGE_MARGIN, WIDTH - FIGHTER_STAGE_MARGIN);
-  world.enemy.x = clamp(world.enemy.x, FIGHTER_STAGE_MARGIN, WIDTH - FIGHTER_STAGE_MARGIN);
+  world.player.x = clamp(
+    world.player.x,
+    FIGHTER_STAGE_MARGIN,
+    WIDTH - FIGHTER_STAGE_MARGIN,
+  );
+  world.enemy.x = clamp(
+    world.enemy.x,
+    FIGHTER_STAGE_MARGIN,
+    WIDTH - FIGHTER_STAGE_MARGIN,
+  );
   const separation = Math.abs(world.player.x - world.enemy.x);
   if (separation < 68) {
     const midpoint = (world.player.x + world.enemy.x) / 2;
@@ -934,24 +1240,37 @@ function drawBar(
   ctx.fillStyle = 'rgba(2, 8, 18, .78)';
   ctx.fill();
   const fillWidth = Math.max(0, (width - 4) * (value / 100));
-  roundedRect(ctx, alignRight ? x + width - 2 - fillWidth : x + 2, y + 2, fillWidth, 14, 7);
+  roundedRect(
+    ctx,
+    alignRight ? x + width - 2 - fillWidth : x + 2,
+    y + 2,
+    fillWidth,
+    14,
+    7,
+  );
   ctx.fillStyle = color;
   ctx.fill();
 }
 
 function actionFrameFor(fighter: Fighter) {
-  if (fighter.state === 'KNOCKDOWN' || fighter.state.startsWith('HIT_')) return 0;
+  if (fighter.state === 'KNOCKDOWN' || fighter.state.startsWith('HIT_'))
+    return 0;
   if (fighter.state === 'THROW') return 2;
   if (!fighter.attack) return 0;
 
   const { data, frame } = fighter.attack;
   if (data.attackType === 'GUN') return 0;
-  const actionFrame = data.attackType === 'PUNCH'
-    ? { HIGH: 1, MID: 2, LOW: 3 }[data.attackLevel]
-    : { HIGH: 4, MID: 5, LOW: 6 }[data.attackLevel];
+  const actionFrame =
+    data.attackType === 'PUNCH'
+      ? { HIGH: 1, MID: 2, LOW: 3 }[data.attackLevel]
+      : { HIGH: 4, MID: 5, LOW: 6 }[data.attackLevel];
   const activeEnd = data.startupFrames + data.activeFrames;
   const total = activeEnd + data.recoveryFrames;
-  if (frame < data.startupFrames * 0.42 || frame > total - data.recoveryFrames * 0.36) return 0;
+  if (
+    frame < data.startupFrames * 0.42 ||
+    frame > total - data.recoveryFrames * 0.36
+  )
+    return 0;
   return actionFrame;
 }
 
@@ -1016,7 +1335,10 @@ function drawEnemyActionFrame(
   const nominalCellHeight = sheet.height / 3;
   const scale = size / nominalCellHeight;
   const column = frame % 4;
-  const drawX = -nominalCellWidth * scale / 2 + (sourceX - column * nominalCellWidth) * scale + xOffset;
+  const drawX =
+    (-nominalCellWidth * scale) / 2 +
+    (sourceX - column * nominalCellWidth) * scale +
+    xOffset;
   const drawY = -(rawY + rawHeight - sourceY) * scale;
 
   ctx.drawImage(
@@ -1037,7 +1359,11 @@ function gunFrameFor(fighter: Fighter) {
   const { data, frame } = fighter.attack;
   const activeEnd = data.startupFrames + data.activeFrames;
   const total = activeEnd + data.recoveryFrames;
-  if (frame < data.startupFrames * 0.38 || frame > total - data.recoveryFrames * 0.32) return 0;
+  if (
+    frame < data.startupFrames * 0.38 ||
+    frame > total - data.recoveryFrames * 0.32
+  )
+    return 0;
   return { HIGH: 1, MID: 2, LOW: 3 }[data.attackLevel];
 }
 
@@ -1062,8 +1388,13 @@ function drawGunFrame(
   );
 }
 
-function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fighter) {
+function drawFighter(
+  ctx: CanvasRenderingContext2D,
+  world: World,
+  fighter: Fighter,
+) {
   const isEnemy = fighter.id === 'enemy';
+  const isKai = !isEnemy && world.playerCharacter === 'kai';
   const attack = fighter.attack?.data;
   const frame = actionFrameFor(fighter);
   const reactionFrame = reactionFrameFor(fighter);
@@ -1073,25 +1404,46 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
   const isHitPose = reactionFrame !== null;
   const isGuardPose = guardFrame !== null && guardLevel !== null;
   const baseY = GROUND_Y;
-  const isCrouchPose = fighter.crouching && !isHitPose && !isGuardPose && !attack;
-  const useGunPose = fighter.id === 'player' && world.gunMode && !isHitPose && !isGuardPose && !isCrouchPose && (!attack || attack.attackType === 'GUN');
-  const combatSheet = isEnemy ? world.enemySheets[world.aiIndex] : world.actionSheet;
-  const combatSheetRows = isEnemy ? 3 : 2;
+  const isCrouchPose =
+    fighter.crouching && !isHitPose && !isGuardPose && !attack;
+  const useGunPose =
+    fighter.id === 'player' &&
+    (world.gunMode || attack?.attackType === 'GUN') &&
+    !isHitPose &&
+    !isGuardPose &&
+    !isCrouchPose &&
+    (!attack || attack.attackType === 'GUN');
+  const combatSheet = isEnemy
+    ? world.enemySheets[world.aiIndex]
+    : isKai
+      ? world.maleActionSheet
+      : world.actionSheet;
+  const combatSheetRows = isEnemy || isKai ? 3 : 2;
   const attackTotal = attack
     ? attack.startupFrames + attack.activeFrames + attack.recoveryFrames
     : 1;
-  const attackProgress = fighter.attack ? clamp(fighter.attack.frame / attackTotal, 0, 1) : 0;
+  const attackProgress = fighter.attack
+    ? clamp(fighter.attack.frame / attackTotal, 0, 1)
+    : 0;
   const actionPulse = attack ? Math.sin(Math.PI * attackProgress) : 0;
-  const activeThrust = attack && attack.attackType !== 'GUN'
-    ? actionPulse * (attack.attackType === 'KICK' ? 42 : 28)
-    : 0;
-  const attackRotation = attack && attack.attackType !== 'GUN'
-    ? fighter.direction * actionPulse * (attack.attackType === 'KICK' ? -0.055 : -0.025)
-    : 0;
-  const enemyActionSize = ENEMY_ACTION_SIZES[world.aiIndex] ?? ENEMY_ACTION_SIZES[0];
-  const enemyFrameRects = ENEMY_FRAME_RECTS[world.aiIndex] ?? ENEMY_FRAME_RECTS[0];
-  const actionSize = isEnemy ? enemyActionSize : PLAYER_ACTION_SIZE;
-  const actionGroundOffset = PLAYER_ACTION_GROUND_OFFSETS[frame] ?? PLAYER_ACTION_GROUND_OFFSETS[0];
+  const activeThrust =
+    attack && attack.attackType !== 'GUN'
+      ? actionPulse * (attack.attackType === 'KICK' ? 42 : 28)
+      : 0;
+  const attackRotation =
+    attack && attack.attackType !== 'GUN'
+      ? fighter.direction *
+        actionPulse *
+        (attack.attackType === 'KICK' ? -0.055 : -0.025)
+      : 0;
+  const spriteIndex = isEnemy ? world.aiIndex : 0;
+  const enemyActionSize =
+    ENEMY_ACTION_SIZES[spriteIndex] ?? ENEMY_ACTION_SIZES[0];
+  const enemyFrameRects =
+    ENEMY_FRAME_RECTS[spriteIndex] ?? ENEMY_FRAME_RECTS[0];
+  const actionSize = isEnemy || isKai ? enemyActionSize : PLAYER_ACTION_SIZE;
+  const actionGroundOffset =
+    PLAYER_ACTION_GROUND_OFFSETS[frame] ?? PLAYER_ACTION_GROUND_OFFSETS[0];
 
   ctx.save();
   ctx.globalAlpha = 0.38;
@@ -1106,25 +1458,91 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
   ctx.rotate(attackRotation);
   ctx.scale(fighter.direction, 1);
   if (isHitPose && reactionFrame !== null) {
-    if (isEnemy) {
+    if (isEnemy || isKai) {
       const enemyReactionFrame = reactionFrame + 8;
-      drawEnemyActionFrame(ctx, combatSheet, enemyReactionFrame, enemyActionSize, enemyFrameRects[enemyReactionFrame]);
+      drawEnemyActionFrame(
+        ctx,
+        combatSheet,
+        enemyReactionFrame,
+        enemyActionSize,
+        enemyFrameRects[enemyReactionFrame],
+      );
     } else {
-      drawActionFrame(ctx, world.playerReactionSheet, reactionFrame, PLAYER_REACTION_SIZE, 0, 1, PLAYER_REACTION_GROUND_OFFSETS[reactionFrame] ?? 0);
+      drawActionFrame(
+        ctx,
+        world.playerReactionSheet,
+        reactionFrame,
+        PLAYER_REACTION_SIZE,
+        0,
+        1,
+        PLAYER_REACTION_GROUND_OFFSETS[reactionFrame] ?? 0,
+      );
     }
   } else if (isGuardPose && guardFrame !== null) {
-    if (isEnemy) {
+    if (isEnemy || isKai) {
       const enemyGuardFrame = guardFrame + 7;
-      drawEnemyActionFrame(ctx, combatSheet, enemyGuardFrame, enemyActionSize, enemyFrameRects[enemyGuardFrame]);
+      drawEnemyActionFrame(
+        ctx,
+        combatSheet,
+        enemyGuardFrame,
+        enemyActionSize,
+        enemyFrameRects[enemyGuardFrame],
+      );
     } else {
-      drawActionFrame(ctx, world.playerGuardSheet, guardFrame, PLAYER_GUARD_SIZE, 0, 1, PLAYER_GUARD_GROUND_OFFSETS[guardFrame] ?? 0);
+      drawActionFrame(
+        ctx,
+        world.playerGuardSheet,
+        guardFrame,
+        PLAYER_GUARD_SIZE,
+        0,
+        1,
+        PLAYER_GUARD_GROUND_OFFSETS[guardFrame] ?? 0,
+      );
     }
   } else if (isCrouchPose) {
-    if (isEnemy) drawEnemyActionFrame(ctx, combatSheet, 10, enemyActionSize, enemyFrameRects[10]);
-    else drawActionFrame(ctx, world.playerGuardSheet, 3, PLAYER_GUARD_SIZE, 0, 1, PLAYER_GUARD_GROUND_OFFSETS[3]);
-  } else if (useGunPose) drawGunFrame(ctx, world.gunSheet, gunFrame, PLAYER_GUN_SIZE);
-  else if (isEnemy) drawEnemyActionFrame(ctx, combatSheet, frame, enemyActionSize, enemyFrameRects[frame]);
-  else drawActionFrame(ctx, combatSheet, frame, actionSize, 0, combatSheetRows, actionGroundOffset);
+    if (isEnemy || isKai)
+      drawEnemyActionFrame(
+        ctx,
+        combatSheet,
+        10,
+        enemyActionSize,
+        enemyFrameRects[10],
+      );
+    else
+      drawActionFrame(
+        ctx,
+        world.playerGuardSheet,
+        3,
+        PLAYER_GUARD_SIZE,
+        0,
+        1,
+        PLAYER_GUARD_GROUND_OFFSETS[3],
+      );
+  } else if (useGunPose)
+    drawGunFrame(
+      ctx,
+      world.gunSheets[world.playerCharacter],
+      gunFrame,
+      PLAYER_GUN_SIZE,
+    );
+  else if (isEnemy || isKai)
+    drawEnemyActionFrame(
+      ctx,
+      combatSheet,
+      frame,
+      enemyActionSize,
+      enemyFrameRects[frame],
+    );
+  else
+    drawActionFrame(
+      ctx,
+      combatSheet,
+      frame,
+      actionSize,
+      0,
+      combatSheetRows,
+      actionGroundOffset,
+    );
   ctx.restore();
 
   if (world.showBoxes) {
@@ -1150,9 +1568,14 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
   ctx.clearRect(0, 0, WIDTH, HEIGHT);
   ctx.save();
   const shakeX = world.shake > 0 ? (Math.random() - 0.5) * world.shake : 0;
-  const shakeY = world.shake > 0 ? (Math.random() - 0.5) * world.shake * 0.45 : 0;
+  const shakeY =
+    world.shake > 0 ? (Math.random() - 0.5) * world.shake * 0.45 : 0;
   ctx.translate(shakeX, shakeY);
-  ctx.drawImage(world.stage, 0, 0, WIDTH, HEIGHT);
+  const stageOffset =
+    world.journeyPhase === 'TRAVEL' ? -(world.stageScroll % WIDTH) : 0;
+  ctx.drawImage(world.stage, stageOffset, 0, WIDTH, HEIGHT);
+  if (stageOffset < 0)
+    ctx.drawImage(world.stage, stageOffset + WIDTH, 0, WIDTH, HEIGHT);
   const stageShade = ctx.createLinearGradient(0, 0, 0, HEIGHT);
   stageShade.addColorStop(0, 'rgba(2, 6, 23, .1)');
   stageShade.addColorStop(0.62, 'rgba(2, 6, 23, .05)');
@@ -1160,41 +1583,33 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
   ctx.fillStyle = stageShade;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  for (const projectile of world.projectiles) {
+  if (world.journeyPhase === 'COMBAT' || world.journeyPhase === 'CLEAR')
+    drawFighter(ctx, world, world.enemy);
+  drawFighter(ctx, world, world.player);
+
+  for (const impact of world.impacts) {
+    const strength = clamp(impact.life / 0.48, 0, 1);
     ctx.save();
-    const direction = Math.sign(projectile.velocityX);
-    const trailLength = 54;
-    const gradient = ctx.createLinearGradient(
-      projectile.x - direction * trailLength,
-      projectile.y,
-      projectile.x,
-      projectile.y,
-    );
-    gradient.addColorStop(0, 'rgba(34, 211, 238, 0)');
-    gradient.addColorStop(1, '#e0f2fe');
-    ctx.strokeStyle = gradient;
-    ctx.shadowColor = '#22d3ee';
-    ctx.shadowBlur = 18;
-    ctx.lineWidth = 7;
+    ctx.translate(impact.x, impact.y);
+    ctx.strokeStyle = impact.color;
+    ctx.fillStyle = impact.color;
+    ctx.globalAlpha = strength;
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(projectile.x - direction * trailLength, projectile.y);
-    ctx.lineTo(projectile.x, projectile.y);
+    ctx.arc(0, 0, 9 + (1 - strength) * 14, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.ellipse(projectile.x, projectile.y, 10, 5, 0, 0, Math.PI * 2);
-    ctx.fill();
-    if (world.showBoxes) {
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = '#22d3ee';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(projectile.x - 13, projectile.y - 8, 26, 16);
+    for (let ray = 0; ray < 6; ray += 1) {
+      const angle = (Math.PI * 2 * ray) / 6;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(angle) * 7, Math.sin(angle) * 7);
+      ctx.lineTo(
+        Math.cos(angle) * (15 + strength * 10),
+        Math.sin(angle) * (15 + strength * 10),
+      );
+      ctx.stroke();
     }
     ctx.restore();
   }
-
-  drawFighter(ctx, world, world.enemy);
-  drawFighter(ctx, world, world.player);
   ctx.restore();
 
   const topGradient = ctx.createLinearGradient(0, 0, 0, 125);
@@ -1205,31 +1620,67 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
 
   ctx.font = '700 17px ui-monospace, monospace';
   ctx.fillStyle = '#e2e8f0';
-  ctx.fillText('FIO // 白閃', 54, 38);
+  ctx.fillText(PLAYER_NAMES[world.playerCharacter], 54, 38);
   ctx.textAlign = 'right';
-  ctx.fillText(world.ai.name.toUpperCase(), WIDTH - 54, 38);
+  ctx.fillText(
+    world.journeyPhase === 'TRAVEL'
+      ? 'NEXT ENEMY…'
+      : world.ai.name.toUpperCase(),
+    WIDTH - 54,
+    38,
+  );
   ctx.textAlign = 'left';
   drawBar(ctx, 54, 52, 430, world.player.hp, '#22d3ee');
-  drawBar(ctx, WIDTH - 484, 52, 430, world.enemy.hp, '#fb7185', true);
+  drawBar(
+    ctx,
+    WIDTH - 484,
+    52,
+    430,
+    world.journeyPhase === 'TRAVEL' ? 0 : world.enemy.hp,
+    '#fb7185',
+    true,
+  );
   drawBar(ctx, 54, 79, 282, world.player.stamina, '#fbbf24');
   drawBar(ctx, WIDTH - 336, 79, 282, world.enemy.stamina, '#fbbf24', true);
   ctx.font = '700 12px ui-monospace, monospace';
   ctx.fillStyle = 'rgba(226, 232, 240, .8)';
-  ctx.fillText(`HP ${Math.ceil(world.player.hp)}   ST ${Math.ceil(world.player.stamina)}`, 54, 111);
+  ctx.fillText(
+    `HP ${Math.ceil(world.player.hp)}   ST ${Math.ceil(world.player.stamina)}`,
+    54,
+    111,
+  );
   ctx.textAlign = 'right';
-  ctx.fillText(`ST ${Math.ceil(world.enemy.stamina)}   HP ${Math.ceil(world.enemy.hp)}`, WIDTH - 54, 111);
+  ctx.fillText(
+    world.journeyPhase === 'TRAVEL'
+      ? '前進中…'
+      : `ST ${Math.ceil(world.enemy.stamina)}   HP ${Math.ceil(world.enemy.hp)}`,
+    WIDTH - 54,
+    111,
+  );
   ctx.textAlign = 'center';
   ctx.font = '900 22px ui-monospace, monospace';
   ctx.fillStyle = '#f8fafc';
   ctx.fillText('NEON KARATE', WIDTH / 2, 47);
   ctx.font = '700 12px ui-monospace, monospace';
   ctx.fillStyle = '#67e8f9';
-  ctx.fillText(world.gunMode ? 'SECRET GUN MODE // ACTIVE' : 'CITY DOJO // PROTOTYPE 05', WIDTH / 2, 68);
-  const playerRoundMarks = `${'◆'.repeat(world.playerRounds)}${'◇'.repeat(2 - world.playerRounds)}`;
-  const enemyRoundMarks = `${'◆'.repeat(world.enemyRounds)}${'◇'.repeat(2 - world.enemyRounds)}`;
+  ctx.fillText(
+    world.gunMode
+      ? `PISTOL // ${world.ammo} SHOTS`
+      : 'BARE HANDS // E TO SWITCH',
+    WIDTH / 2,
+    68,
+  );
+  const clearedMarks = '◆'.repeat(world.encounterIndex);
+  const remainingMarks = '◇'.repeat(
+    Math.max(0, world.encounterTotal - world.encounterIndex),
+  );
   ctx.font = '900 13px ui-monospace, monospace';
   ctx.fillStyle = 'rgba(226, 232, 240, .86)';
-  ctx.fillText(`${playerRoundMarks}   ROUND ${world.roundNumber}   ${enemyRoundMarks}`, WIDTH / 2, 96);
+  ctx.fillText(
+    `${clearedMarks}${remainingMarks}   STAGE ${Math.min(world.encounterIndex + 1, world.encounterTotal)}/${world.encounterTotal}`,
+    WIDTH / 2,
+    96,
+  );
 
   if (world.banner) {
     ctx.save();
@@ -1261,29 +1712,27 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
       world.status === 'LOADING'
         ? 'LOADING FIGHT DATA…'
         : world.gunMode
-          ? 'SECRET MODE READY // 按下開始'
-          : '按下開始，進入三戰兩勝',
+          ? 'PISTOL READY // 按下開始'
+          : '按下開始，一路迎戰到最終 Boss',
       WIDTH / 2,
       330,
     );
     if (world.status === 'READY') {
       ctx.font = '700 14px ui-monospace, monospace';
       ctx.fillStyle = '#f8fafc';
-      ctx.fillText('BEST OF 3 // FIRST TO TWO ROUNDS', WIDTH / 2, 365);
-      ctx.fillStyle = world.gunMode ? '#a5f3fc' : 'rgba(226, 232, 240, .62)';
-      ctx.fillText(
-        world.gunMode
-          ? '↑ / ↓ 選段位 · Q 射擊 · W 踢擊'
-          : 'CITY RUMOR // ↑ ↑ ↓ ↓ ← → ← → Q W',
-        WIDTH / 2,
-        392,
-      );
+      ctx.fillText('6 ENCOUNTERS // FINAL BOSS', WIDTH / 2, 365);
+      ctx.fillStyle = 'rgba(226, 232, 240, .7)';
+      ctx.fillText('E 切換拳槍 · 槍共 6 發 · 子彈用完自動出拳', WIDTH / 2, 392);
       ctx.font = '900 20px ui-sans-serif, system-ui';
-      ctx.fillStyle = world.ai.accent;
-      ctx.fillText(`${world.ai.name} // ${world.ai.archetype}`, WIDTH / 2, 435);
+      ctx.fillStyle = world.playerCharacter === 'fio' ? '#67e8f9' : '#fbbf24';
+      ctx.fillText(
+        `${PLAYER_NAMES[world.playerCharacter]} // READY`,
+        WIDTH / 2,
+        435,
+      );
       ctx.font = '700 14px ui-monospace, monospace';
       ctx.fillStyle = 'rgba(226, 232, 240, .72)';
-      ctx.fillText(world.ai.description, WIDTH / 2, 464);
+      ctx.fillText('普通敵人血量較少，攻勢會隨路程逐步增強', WIDTH / 2, 464);
     }
   }
 
@@ -1297,8 +1746,8 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
     const lines = [
       `AI      ${world.ai.id}`,
       `AI ZONE ${world.ai.preferredMinRange}–${world.ai.preferredMaxRange}px`,
-      `ROUND   ${world.roundNumber}  SCORE ${world.playerRounds}–${world.enemyRounds}`,
-      `MATCH   ${world.matchOver ? 'OVER' : 'LIVE'}`,
+      `STAGE   ${world.encounterIndex + 1}/${world.encounterTotal} ${world.journeyPhase}`,
+      `JOURNEY ${world.matchOver ? 'OVER' : 'LIVE'}`,
       `PLAYER  ${world.player.state}`,
       `ENEMY   ${world.enemy.state}`,
       `DIST    ${distance}px`,
@@ -1309,7 +1758,7 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
       `LEVEL   ${world.player.attack?.data.attackLevel ?? '—'}`,
       `GRAPPLE ${world.grapple ? `${Math.max(0, world.grapple.timer).toFixed(2)}s` : 'OFF'}`,
       `GUN     ${world.gunMode ? 'ON' : 'OFF'}`,
-      `BULLETS ${world.projectiles.length}`,
+      `AMMO    ${world.ammo}/${world.maxAmmo}`,
       `BOXES   ${world.showBoxes ? 'ON' : 'OFF'}`,
     ];
     ctx.textAlign = 'left';
@@ -1337,16 +1786,21 @@ export function KarateGame() {
   const [showBoxes, setShowBoxes] = useState(false);
   const [sound, setSound] = useState(true);
   const [gunMode, setGunMode] = useState(false);
+  const [playerCharacter, setPlayerCharacter] =
+    useState<PlayerCharacter>('fio');
   const [opponents, setOpponents] = useState<AIData[]>([]);
   const [activeOpponentIndex, setActiveOpponentIndex] = useState(0);
-  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(
+    null,
+  );
   const [isInstalled, setIsInstalled] = useState(false);
   const [showInstallHelp, setShowInstallHelp] = useState(false);
-  const [matchView, setMatchView] = useState<MatchView>({
-    playerRounds: 0,
-    enemyRounds: 0,
-    roundNumber: 1,
-    matchOver: false,
+  const [journeyView, setJourneyView] = useState<JourneyView>({
+    encounter: 1,
+    total: ENCOUNTER_TOTAL,
+    ammo: 6,
+    phase: 'TRAVEL',
+    complete: false,
   });
   const activeKeyLabels = gunMode ? gunKeyLabels : meleeKeyLabels;
   const activeOpponent = opponents[activeOpponentIndex];
@@ -1356,18 +1810,20 @@ export function KarateGame() {
       : status === 'ERROR'
         ? '載入失敗'
         : status === 'FIGHTING' || status === 'PAUSED'
-      ? '重新對戰'
-      : status === 'KO'
-        ? matchView.matchOver
-          ? '再戰一場'
-          : '下一回合'
-        : '開始三戰兩勝';
+          ? '重新闖關'
+          : status === 'KO'
+            ? '重新出發'
+            : '開始闖關';
 
   useEffect(() => {
     const standaloneQuery = window.matchMedia('(display-mode: standalone)');
-    const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };
+    const navigatorWithStandalone = navigator as Navigator & {
+      standalone?: boolean;
+    };
     const updateInstalledState = () => {
-      setIsInstalled(standaloneQuery.matches || navigatorWithStandalone.standalone === true);
+      setIsInstalled(
+        standaloneQuery.matches || navigatorWithStandalone.standalone === true,
+      );
     };
     const captureInstallPrompt = (event: Event) => {
       event.preventDefault();
@@ -1414,7 +1870,8 @@ export function KarateGame() {
         longKickSheet,
         grapplerSheet,
         playerGuardSheet,
-        gunSheet,
+        fioGunSheet,
+        kaiGunSheet,
       ] = await Promise.all([
         fetch('/game-data/attacks.json'),
         fetch('/game-data/ai.json'),
@@ -1425,7 +1882,8 @@ export function KarateGame() {
         loadImage('/enemy-long-kick-v3.png'),
         loadImage('/enemy-grappler-v3.png'),
         loadImage('/fio-guards-v2.png'),
-        loadImage('/fio-gun-actions-v3.png'),
+        loadImage('/fio-gun-actions-v6.png'),
+        loadImage('/kai-gun-actions-v2.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
       const aiPayload = (await aiResponse.json()) as AIData[] | AIData;
@@ -1455,7 +1913,8 @@ export function KarateGame() {
         playerReactionSheet,
         enemySheets: [quickFistSheet, longKickSheet, grapplerSheet],
         playerGuardSheet,
-        gunSheet,
+        maleActionSheet: quickFistSheet,
+        gunSheets: { fio: fioGunSheet, kai: kaiGunSheet },
         status: 'READY',
         previousStatus: 'READY',
         keys: new Set(),
@@ -1466,10 +1925,15 @@ export function KarateGame() {
         banner: null,
         aiDecisionTimer: 0,
         aiRetreatTimer: 0,
-        playerRounds: 0,
-        enemyRounds: 0,
-        roundNumber: 1,
-        roundResolved: false,
+        playerCharacter: 'fio',
+        encounterIndex: 0,
+        encounterTotal: ENCOUNTER_TOTAL,
+        journeyPhase: 'TRAVEL',
+        phaseTimer: 0,
+        stageScroll: 0,
+        ammo: 6,
+        maxAmmo: 6,
+        encounterResolved: false,
         matchOver: false,
         hitStop: 0,
         shake: 0,
@@ -1477,19 +1941,24 @@ export function KarateGame() {
         showBoxes: false,
         sound: true,
         gunMode: false,
-        secretIndex: 0,
         audio: null,
         lastTime: performance.now(),
         frameHandle: 0,
         onStatus: setReactStatus,
         onGunMode: setGunMode,
         onAIChange: setActiveOpponentIndex,
-        onMatchChange: setMatchView,
+        onJourneyChange: setJourneyView,
       };
       worldRef.current = world;
       setOpponents(ais);
       setActiveOpponentIndex(0);
-      setMatchView({ playerRounds: 0, enemyRounds: 0, roundNumber: 1, matchOver: false });
+      setJourneyView({
+        encounter: 1,
+        total: ENCOUNTER_TOTAL,
+        ammo: 6,
+        phase: 'TRAVEL',
+        complete: false,
+      });
       setReactStatus('READY');
 
       const loop = (time: number) => {
@@ -1518,16 +1987,23 @@ export function KarateGame() {
       const world = worldRef.current;
       if (!world) return;
       const key = event.key.toLowerCase();
-      const gameKeys = ['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'q', 'w'];
+      const gameKeys = [
+        'arrowleft',
+        'arrowright',
+        'arrowup',
+        'arrowdown',
+        'q',
+        'w',
+        'e',
+      ];
       if (gameKeys.includes(key)) event.preventDefault();
       if (!world.keys.has(key)) {
         world.justPressed.add(key);
-        trackSecretInput(world, key);
       }
       world.keys.add(key);
-      if (['1', '2', '3'].includes(key)) selectAI(world, Number(key) - 1);
-      if (key === 'enter' && world.status === 'READY') resetWorld(world, true);
-      if (key === 'r') resetWorld(world, world.status !== 'KO' || world.matchOver);
+      if (key === 'enter' && world.status === 'READY') resetWorld(world);
+      if (key === 'r') resetWorld(world);
+      if (key === 'e' && !event.repeat) toggleWeapon(world);
       if (key === 'p' && world.status === 'FIGHTING') {
         world.previousStatus = world.status;
         setStatus(world, 'PAUSED');
@@ -1576,14 +2052,15 @@ export function KarateGame() {
     const world = worldRef.current;
     if (!world) return;
     ensureAudio();
-    resetWorld(world, world.status !== 'KO' || world.matchOver);
+    resetWorld(world);
     canvasRef.current?.focus();
   }, [ensureAudio]);
 
-  const selectOpponent = useCallback((index: number) => {
+  const chooseCharacter = useCallback((character: PlayerCharacter) => {
     const world = worldRef.current;
     if (!world) return;
-    selectAI(world, index);
+    selectPlayerCharacter(world, character);
+    setPlayerCharacter(character);
     canvasRef.current?.focus();
   }, []);
 
@@ -1592,12 +2069,21 @@ export function KarateGame() {
     if (!world) return;
     if (!world.keys.has(key)) {
       world.justPressed.add(key);
-      trackSecretInput(world, key);
     }
     world.keys.add(key);
   }, []);
 
-  const release = useCallback((key: string) => worldRef.current?.keys.delete(key), []);
+  const release = useCallback(
+    (key: string) => worldRef.current?.keys.delete(key),
+    [],
+  );
+
+  const toggleWeaponControl = useCallback(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    toggleWeapon(world);
+    canvasRef.current?.focus();
+  }, []);
 
   const toggleDebug = useCallback(() => {
     const world = worldRef.current;
@@ -1655,18 +2141,19 @@ export function KarateGame() {
       <header className="game-header flex flex-col gap-3 border-b border-cyan-300/15 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.28em] text-cyan-300/75">
-            Prototype 06 · Guard Arsenal
+            Journey 01 · Final Boss Route
           </p>
           <h1 className="mt-1 text-2xl font-black tracking-[-0.04em] text-slate-50 sm:text-4xl">
             NEON KARATE <span className="text-cyan-300">{'// 城市道場'}</span>
           </h1>
-          {gunMode && (
-            <p className="mr-2 mt-2 inline-flex rounded-full border border-cyan-300/35 bg-cyan-300/10 px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.2em] text-cyan-200">
-              Secret Gun Mode Active
-            </p>
-          )}
+          <p
+            className={`mr-2 mt-2 inline-flex rounded-full border px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.2em] ${gunMode ? 'border-cyan-300/35 bg-cyan-300/10 text-cyan-200' : 'border-amber-300/25 bg-amber-300/10 text-amber-200'}`}
+          >
+            {gunMode ? `Pistol · ${journeyView.ammo}/6` : 'Bare Hands'}
+          </p>
           <p className="mt-2 inline-flex rounded-full border border-white/10 bg-white/[.04] px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-slate-300">
-            Best of 3 · Fio {matchView.playerRounds}–{matchView.enemyRounds} Rival · Round {matchView.roundNumber}
+            {PLAYER_NAMES[playerCharacter]} · Stage {journeyView.encounter}/
+            {journeyView.total} · {journeyView.phase}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1676,7 +2163,11 @@ export function KarateGame() {
             size="lg"
             className="border border-cyan-300/35 bg-cyan-300 text-slate-950 shadow-[0_0_28px_rgba(34,211,238,.22)] hover:bg-cyan-200"
           >
-            {status === 'FIGHTING' || status === 'PAUSED' ? <RotateCcw /> : <Play />}
+            {status === 'FIGHTING' || status === 'PAUSED' ? (
+              <RotateCcw />
+            ) : (
+              <Play />
+            )}
             {startLabel}
           </Button>
           {!isInstalled && (
@@ -1684,42 +2175,85 @@ export function KarateGame() {
               <Download /> 下載到手機
             </Button>
           )}
-          <Button onClick={toggleDebug} variant="outline" size="lg" aria-pressed={debug}>
+          <Button
+            onClick={toggleWeaponControl}
+            variant="outline"
+            size="lg"
+            disabled={status === 'LOADING' || status === 'ERROR'}
+          >
+            <Crosshair />{' '}
+            {gunMode ? '切回拳腳' : `裝備手槍 ${journeyView.ammo}/6`}
+          </Button>
+          <Button
+            onClick={toggleDebug}
+            variant="outline"
+            size="lg"
+            aria-pressed={debug}
+          >
             <Bug /> Debug
           </Button>
-          <Button onClick={toggleBoxes} variant="outline" size="lg" aria-pressed={showBoxes}>
+          <Button
+            onClick={toggleBoxes}
+            variant="outline"
+            size="lg"
+            aria-pressed={showBoxes}
+          >
             <Crosshair /> Hitbox
           </Button>
-          <Button onClick={toggleSound} variant="outline" size="icon-lg" aria-label="切換音效">
+          <Button
+            onClick={toggleSound}
+            variant="outline"
+            size="icon-lg"
+            aria-label="切換音效"
+          >
             {sound ? <Volume2 /> : <VolumeX />}
           </Button>
         </div>
       </header>
 
-      <div className="rival-select" aria-label="選擇 AI 對手">
-        {opponents.map((opponent, index) => {
-          const selected = index === activeOpponentIndex;
-          return (
-            <button
-              key={opponent.id}
-              type="button"
-              onClick={() => selectOpponent(index)}
-              disabled={status === 'FIGHTING' || status === 'PAUSED'}
-              aria-pressed={selected}
-              className={`rival-card ${selected ? 'selected' : ''}`}
-              style={selected ? { borderColor: opponent.accent, boxShadow: `0 0 24px ${opponent.accent}22` } : undefined}
-            >
-              <span className="rival-index" style={{ color: opponent.accent }}>
-                0{index + 1} {'//'} {opponent.archetype}
-              </span>
-              <strong>{opponent.name}</strong>
-              <small>{opponent.description}</small>
-              <span className="rival-tendency">
-                拳 {Math.round(opponent.punchRate * 100)} · 踢 {Math.round(opponent.kickRate * 100)} · 反應 {opponent.reactionFrames}F
-              </span>
-            </button>
-          );
-        })}
+      <div className="rival-select character-select" aria-label="選擇玩家角色">
+        <button
+          type="button"
+          onClick={() => chooseCharacter('fio')}
+          disabled={status === 'FIGHTING' || status === 'PAUSED'}
+          aria-pressed={playerCharacter === 'fio'}
+          className={`rival-card ${playerCharacter === 'fio' ? 'selected' : ''}`}
+          style={
+            playerCharacter === 'fio'
+              ? { borderColor: '#67e8f9', boxShadow: '0 0 24px #67e8f922' }
+              : undefined
+          }
+        >
+          <span className="rival-index text-cyan-300">PLAYER 01 // 靈巧型</span>
+          <strong>FIO · 白閃</strong>
+          <small>速度與段位控制均衡，適合精準反擊。</small>
+          <span className="rival-tendency">拳腳完整 · 現代雙手持槍</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => chooseCharacter('kai')}
+          disabled={status === 'FIGHTING' || status === 'PAUSED'}
+          aria-pressed={playerCharacter === 'kai'}
+          className={`rival-card ${playerCharacter === 'kai' ? 'selected' : ''}`}
+          style={
+            playerCharacter === 'kai'
+              ? { borderColor: '#fbbf24', boxShadow: '0 0 24px #fbbf2422' }
+              : undefined
+          }
+        >
+          <span className="rival-index text-amber-300">
+            PLAYER 02 // 快拳型
+          </span>
+          <strong>KAI · 瞬拳</strong>
+          <small>男性可操控角色，近身拳速俐落、動作完整。</small>
+          <span className="rival-tendency">拳腳完整 · 現代雙手持槍</span>
+        </button>
+        <div className="rival-card journey-card" aria-label="闖關規則">
+          <span className="rival-index text-rose-300">ROUTE // 6 戰</span>
+          <strong>一路前進，最後打 Boss</strong>
+          <small>前五名敵人血量較少、攻擊較單純；最後一戰攻勢完整。</small>
+          <span className="rival-tendency">過關回復 14 HP · 手槍共 6 發</span>
+        </div>
       </div>
 
       <div className="game-stage relative overflow-hidden rounded-[18px] border border-cyan-200/20 bg-slate-950 shadow-[0_28px_100px_rgba(0,0,0,.45)]">
@@ -1735,10 +2269,14 @@ export function KarateGame() {
           <div className="absolute inset-0 grid place-items-center bg-slate-950/80 backdrop-blur-sm">
             <div className="px-6 text-center">
               <p className="font-mono text-sm font-black uppercase tracking-[0.24em] text-cyan-200">
-                {status === 'LOADING' ? 'Loading Fight Data…' : 'Asset Load Failed'}
+                {status === 'LOADING'
+                  ? 'Loading Fight Data…'
+                  : 'Asset Load Failed'}
               </p>
               <p className="mt-3 text-sm text-slate-400">
-                {status === 'LOADING' ? '正在載入場景、角色與招式資料' : '請重新整理頁面再試一次'}
+                {status === 'LOADING'
+                  ? '正在載入場景、角色與招式資料'
+                  : '請重新整理頁面再試一次'}
               </p>
             </div>
           </div>
@@ -1752,14 +2290,31 @@ export function KarateGame() {
           </div>
         )}
         {status !== 'LOADING' && status !== 'ERROR' && (
-          <div className="mobile-landscape-controls" aria-label="手機橫向虛擬鍵盤">
+          <div
+            className="mobile-landscape-controls"
+            aria-label="手機橫向虛擬鍵盤"
+          >
             <div className="mobile-dpad" aria-label="方向控制">
               <span />
-              <button aria-label="上段，按住後再按攻擊" {...holdProps('arrowup')}>↑</button>
+              <button
+                aria-label="上段，按住後再按攻擊"
+                {...holdProps('arrowup')}
+              >
+                ↑
+              </button>
               <span />
-              <button aria-label="後退" {...holdProps('arrowleft')}>←</button>
-              <button aria-label="蹲下或下段，按住後再按攻擊" {...holdProps('arrowdown')}>↓</button>
-              <button aria-label="前進" {...holdProps('arrowright')}>→</button>
+              <button aria-label="後退" {...holdProps('arrowleft')}>
+                ←
+              </button>
+              <button
+                aria-label="蹲下或下段，按住後再按攻擊"
+                {...holdProps('arrowdown')}
+              >
+                ↓
+              </button>
+              <button aria-label="前進" {...holdProps('arrowright')}>
+                →
+              </button>
             </div>
             {(status === 'READY' || status === 'KO' || status === 'PAUSED') && (
               <button className="mobile-start-button" onClick={start}>
@@ -1767,11 +2322,23 @@ export function KarateGame() {
               </button>
             )}
             {!isInstalled && (
-              <button className="mobile-install-button" onClick={installGame} aria-label="安裝遊戲到手機">
+              <button
+                className="mobile-install-button"
+                onClick={installGame}
+                aria-label="安裝遊戲到手機"
+              >
                 <Download />
                 <span>安裝</span>
               </button>
             )}
+            <button
+              className="mobile-weapon-button"
+              onClick={toggleWeaponControl}
+              aria-label="切換拳腳與手槍"
+            >
+              <Crosshair />
+              <span>{gunMode ? '拳腳' : `手槍 ${journeyView.ammo}`}</span>
+            </button>
             <div className="mobile-attack-pad" aria-label="攻擊控制">
               {activeKeyLabels.map(({ input, label, tone }) => (
                 <button
@@ -1793,27 +2360,60 @@ export function KarateGame() {
       <div className="standard-controls grid gap-3 lg:grid-cols-[1fr_auto_1fr]">
         <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-white/[.035] p-3">
           <span />
-          <button className="control-button" aria-label="上段修飾" {...holdProps('arrowup')}>↑</button>
+          <button
+            className="control-button"
+            aria-label="上段修飾"
+            {...holdProps('arrowup')}
+          >
+            ↑
+          </button>
           <span />
-          <button className="control-button" aria-label="後退" {...holdProps('arrowleft')}>←</button>
-          <button className="control-button" aria-label="蹲下" {...holdProps('arrowdown')}>↓</button>
-          <button className="control-button" aria-label="前進" {...holdProps('arrowright')}>→</button>
+          <button
+            className="control-button"
+            aria-label="後退"
+            {...holdProps('arrowleft')}
+          >
+            ←
+          </button>
+          <button
+            className="control-button"
+            aria-label="蹲下"
+            {...holdProps('arrowdown')}
+          >
+            ↓
+          </button>
+          <button
+            className="control-button"
+            aria-label="前進"
+            {...holdProps('arrowright')}
+          >
+            →
+          </button>
           <span />
-          <span className="self-center text-center font-mono text-[10px] uppercase tracking-widest text-slate-500">移動</span>
+          <span className="self-center text-center font-mono text-[10px] uppercase tracking-widest text-slate-500">
+            移動
+          </span>
           <span />
         </div>
 
         <div className="flex items-center justify-center px-5 text-center">
           <p className="max-w-48 font-mono text-[11px] leading-5 text-slate-400">
             {gunMode ? (
-              <>↑ / ↓ 選段位<br />Q 射擊 · W 踢擊</>
+              <>
+                ↑ / ↓ 選段位
+                <br />Q 射擊 · W 腳 · E 切拳
+              </>
             ) : (
-              <>↑ + 攻擊：上段 · 直接攻擊：中段<br />↓ + 攻擊：下段<br />Q 拳 · W 腳</>
+              <>
+                ↑ + 攻擊：上段 · 直接攻擊：中段
+                <br />↓ + 攻擊：下段
+                <br />Q 拳 · W 腳
+              </>
             )}
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-white/[.035] p-3">
+        <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-white/[.035] p-3">
           {activeKeyLabels.map(({ input, label, tone }) => (
             <button
               key={input}
@@ -1825,12 +2425,24 @@ export function KarateGame() {
               <span>{label}</span>
             </button>
           ))}
+          <button
+            className="attack-button shot"
+            aria-label="切換拳腳與手槍，鍵盤 E"
+            onClick={toggleWeaponControl}
+          >
+            <kbd>E</kbd>
+            <span>{gunMode ? '拳腳' : `手槍 ${journeyView.ammo}`}</span>
+          </button>
         </div>
       </div>
 
       <footer className="game-footer flex flex-wrap items-center justify-between gap-2 px-1 font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500">
-        <p>{gunMode ? 'SECRET：↑/↓ 選段位 · Q 射擊 · W 踢擊' : `三戰兩勝 · 1/2/3 選對手 · ${activeOpponent?.archetype ?? '載入對手中'}`}</p>
-        <p>方向鍵移動／選段位 · Q 拳 · W 腳 · R 下一回合</p>
+        <p>
+          {journeyView.phase === 'TRAVEL'
+            ? '自動前進中 · 敵人出現後開戰'
+            : `目前對手 · ${activeOpponent?.archetype ?? '載入中'}`}
+        </p>
+        <p>方向鍵移動／選段位 · Q 拳或射擊 · W 腳 · E 切換武器 · R 重新闖關</p>
       </footer>
       {showInstallHelp && (
         <div className="install-help-backdrop">
@@ -1840,14 +2452,26 @@ export function KarateGame() {
             aria-modal="true"
             aria-labelledby="install-help-title"
           >
-            <button className="install-help-close" onClick={() => setShowInstallHelp(false)} aria-label="關閉安裝說明">
+            <button
+              className="install-help-close"
+              onClick={() => setShowInstallHelp(false)}
+              aria-label="關閉安裝說明"
+            >
               <X />
             </button>
             <Smartphone className="install-help-icon" aria-hidden="true" />
             <h2 id="install-help-title">下載到手機遊玩</h2>
-            <p><strong>iPhone／iPad：</strong>使用 Safari 開啟，按「分享」後選擇「加入主畫面」。</p>
-            <p><strong>Android：</strong>使用 Chrome 開啟選單，選擇「安裝應用程式」或「加到主畫面」。</p>
-            <p className="install-help-note">安裝完成後可直接從手機桌面啟動，橫置即可使用虛擬按鍵。</p>
+            <p>
+              <strong>iPhone／iPad：</strong>使用 Safari
+              開啟，按「分享」後選擇「加入主畫面」。
+            </p>
+            <p>
+              <strong>Android：</strong>使用 Chrome
+              開啟選單，選擇「安裝應用程式」或「加到主畫面」。
+            </p>
+            <p className="install-help-note">
+              安裝完成後可直接從手機桌面啟動，橫置即可使用虛擬按鍵。
+            </p>
           </dialog>
         </div>
       )}
