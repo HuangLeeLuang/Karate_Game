@@ -11,8 +11,10 @@ import {
   Bug,
   Crosshair,
   Download,
+  HeartPulse,
   Play,
   RotateCcw,
+  ShoppingCart,
   Smartphone,
   Volume2,
   VolumeX,
@@ -44,7 +46,13 @@ type AttackPhase = 'STARTUP' | 'ACTIVE' | 'RECOVERY' | null;
 type GameStatus = 'LOADING' | 'READY' | 'FIGHTING' | 'KO' | 'PAUSED' | 'ERROR';
 type Direction = -1 | 1;
 type PlayerCharacter = 'fio' | 'kai';
-type JourneyPhase = 'TRAVEL' | 'COMBAT' | 'CLEAR' | 'COMPLETE';
+type JourneyPhase =
+  | 'TRAVEL'
+  | 'COMBAT'
+  | 'CLEAR'
+  | 'CHECKPOINT'
+  | 'SHOP'
+  | 'COMPLETE';
 
 interface AttackData {
   id: string;
@@ -136,6 +144,9 @@ interface JourneyView {
   encounter: number;
   total: number;
   ammo: number;
+  cash: number;
+  energyDrinks: number;
+  minionsDefeated: number;
   phase: JourneyPhase;
   complete: boolean;
 }
@@ -161,6 +172,7 @@ interface World {
   playerGuardSheet: HTMLImageElement;
   maleActionSheet: HTMLImageElement;
   gunSheets: Record<PlayerCharacter, HTMLImageElement>;
+  walkSheets: Record<PlayerCharacter, HTMLImageElement>;
   status: GameStatus;
   previousStatus: GameStatus;
   keys: Set<string>;
@@ -177,8 +189,12 @@ interface World {
   journeyPhase: JourneyPhase;
   phaseTimer: number;
   stageScroll: number;
+  animationTime: number;
   ammo: number;
   maxAmmo: number;
+  cash: number;
+  energyDrinks: number;
+  minionsDefeated: number;
   encounterResolved: boolean;
   matchOver: boolean;
   hitStop: number;
@@ -202,6 +218,7 @@ const PLAYER_REACTION_SIZE = 448;
 const PLAYER_GUARD_SIZE = 420;
 const PLAYER_GUN_SIZE = 359;
 const PLAYER_GUN_GROUND_OFFSET = 3;
+const PLAYER_WALK_SIZE = 405;
 const ENEMY_ACTION_SIZES = [372, 367, 375] as const;
 const ENEMY_FRAME_RECTS = [
   [
@@ -250,6 +267,16 @@ const ENEMY_FRAME_RECTS = [
 const PLAYER_ACTION_GROUND_OFFSETS = [15, 17, 16, 18, 37, 36, 34, 32] as const;
 const PLAYER_REACTION_GROUND_OFFSETS = [35, 34, 35, 37] as const;
 const PLAYER_GUARD_GROUND_OFFSETS = [25, 31, 28, 31] as const;
+const PLAYER_FRAME_RECTS = [
+  [149, 16, 207, 412],
+  [528, 26, 278, 398],
+  [955, 37, 279, 388],
+  [1320, 149, 342, 274],
+  [91, 456, 299, 388],
+  [514, 452, 314, 393],
+  [966, 600, 335, 247],
+  [1322, 460, 346, 390],
+] as const;
 const attackInputByLevel: Record<
   'PUNCH' | 'KICK' | 'GUN',
   Record<AttackLevel, string>
@@ -258,10 +285,16 @@ const attackInputByLevel: Record<
   KICK: { HIGH: 'w', MID: 's', LOW: 'x' },
   GUN: { HIGH: 'q', MID: 'a', LOW: 'z' },
 };
-const ENCOUNTER_TOTAL = 6;
-const ENCOUNTER_HP = [30, 34, 40, 46, 54, 100] as const;
-const FIO_ENEMY_ROSTER = [0, 1, 0, 1, 0, 2] as const;
-const KAI_ENEMY_ROSTER = [1, 2, 1, 2, 1, 2] as const;
+const MINION_TOTAL = 10;
+const ENCOUNTER_TOTAL = MINION_TOTAL + 1;
+const ENCOUNTER_HP = [26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 100] as const;
+const FIO_ENEMY_ROSTER = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 2] as const;
+const KAI_ENEMY_ROSTER = [1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 2] as const;
+const MINION_REWARD = 10;
+const ENERGY_DRINK_COST = 20;
+const ENERGY_DRINK_HEAL = 35;
+const AMMO_PACK_COST = 20;
+const AMMO_PACK_SIZE = 6;
 const PLAYER_NAMES: Record<PlayerCharacter, string> = {
   fio: 'FIO // 白閃',
   kai: 'KAI // 瞬拳',
@@ -512,9 +545,86 @@ function emitJourney(world: World) {
     encounter: Math.min(world.encounterIndex + 1, world.encounterTotal),
     total: world.encounterTotal,
     ammo: world.ammo,
+    cash: world.cash,
+    energyDrinks: world.energyDrinks,
+    minionsDefeated: world.minionsDefeated,
     phase: world.journeyPhase,
     complete: world.matchOver,
   });
+}
+
+function consumeEnergyDrink(world: World) {
+  if (world.energyDrinks <= 0 || world.player.hp >= 100 || world.matchOver)
+    return;
+  const recovered = Math.min(ENERGY_DRINK_HEAL, 100 - world.player.hp);
+  world.energyDrinks -= 1;
+  world.player.hp += recovered;
+  world.banner = {
+    text: `ENERGY +${recovered}`,
+    subtext: `剩餘 ${world.energyDrinks} 罐`,
+    color: '#4ade80',
+    life: 1,
+  };
+  world.impacts.push({
+    x: world.player.x,
+    y: GROUND_Y - 150,
+    life: 0.5,
+    color: '#4ade80',
+  });
+  emitJourney(world);
+  playTone(world, 660, 0.13, 0.04);
+}
+
+function enterShop(world: World) {
+  if (world.journeyPhase !== 'CHECKPOINT') return;
+  world.journeyPhase = 'SHOP';
+  world.banner = null;
+  emitJourney(world);
+  playTone(world, 520, 0.09, 0.03);
+}
+
+function continueJourney(world: World) {
+  if (world.journeyPhase !== 'CHECKPOINT' && world.journeyPhase !== 'SHOP')
+    return;
+  world.journeyPhase = 'TRAVEL';
+  world.phaseTimer = 1.65;
+  world.encounterResolved = false;
+  world.banner = {
+    text: 'ADVANCE',
+    subtext: `下一戰 ${world.encounterIndex + 1}/${world.encounterTotal}`,
+    color: '#67e8f9',
+    life: 0.85,
+  };
+  emitJourney(world);
+  playTone(world, 420, 0.08, 0.03);
+}
+
+function buyEnergyDrink(world: World) {
+  if (world.journeyPhase !== 'SHOP' || world.cash < ENERGY_DRINK_COST) return;
+  world.cash -= ENERGY_DRINK_COST;
+  world.energyDrinks += 1;
+  world.banner = {
+    text: 'ENERGY DRINK +1',
+    subtext: `現金 $${world.cash}`,
+    color: '#4ade80',
+    life: 0.9,
+  };
+  emitJourney(world);
+  playTone(world, 740, 0.08, 0.03);
+}
+
+function buyAmmoPack(world: World) {
+  if (world.journeyPhase !== 'SHOP' || world.cash < AMMO_PACK_COST) return;
+  world.cash -= AMMO_PACK_COST;
+  world.ammo += AMMO_PACK_SIZE;
+  world.banner = {
+    text: `AMMO +${AMMO_PACK_SIZE}`,
+    subtext: `共 ${world.ammo} 發 // 現金 $${world.cash}`,
+    color: '#22d3ee',
+    life: 0.9,
+  };
+  emitJourney(world);
+  playTone(world, 820, 0.08, 0.03);
 }
 
 function setGunMode(world: World, enabled: boolean) {
@@ -587,7 +697,11 @@ function resetWorld(world: World) {
   world.journeyPhase = 'TRAVEL';
   world.phaseTimer = 1.75;
   world.stageScroll = 0;
+  world.animationTime = 0;
   world.ammo = world.maxAmmo;
+  world.cash = 0;
+  world.energyDrinks = 0;
+  world.minionsDefeated = 0;
   world.gunMode = false;
   world.onGunMode(false);
   world.player.displayName = PLAYER_NAMES[world.playerCharacter];
@@ -623,7 +737,12 @@ function selectPlayerCharacter(world: World, character: PlayerCharacter) {
   world.enemy.hp = 0;
   world.journeyPhase = 'TRAVEL';
   world.encounterIndex = 0;
+  world.stageScroll = 0;
+  world.animationTime = 0;
   world.ammo = world.maxAmmo;
+  world.cash = 0;
+  world.energyDrinks = 0;
+  world.minionsDefeated = 0;
   world.matchOver = false;
   world.gunMode = false;
   world.onGunMode(false);
@@ -1097,12 +1216,18 @@ function checkKO(world: World) {
   }
 
   const bossDefeated = world.encounterIndex >= world.encounterTotal - 1;
+  if (!bossDefeated) {
+    world.cash += MINION_REWARD;
+    world.minionsDefeated += 1;
+  }
   world.matchOver = bossDefeated;
   world.journeyPhase = bossDefeated ? 'COMPLETE' : 'CLEAR';
   world.phaseTimer = 1.25;
   world.banner = {
     text: bossDefeated ? 'BOSS DEFEATED' : 'ENEMY DOWN',
-    subtext: bossDefeated ? '城市道場制霸 // 按 R 再闖一次' : '繼續前進',
+    subtext: bossDefeated
+      ? '城市道場制霸 // 按 R 再闖一次'
+      : `+$${MINION_REWARD} // 現金 $${world.cash}`,
     color: '#67e8f9',
     life: bossDefeated ? 999 : 1.15,
   };
@@ -1113,6 +1238,8 @@ function checkKO(world: World) {
 
 function updateWorld(world: World, dt: number) {
   if (world.status !== 'FIGHTING') return;
+
+  world.animationTime += dt;
 
   if (world.hitStop > 0) {
     world.hitStop = Math.max(0, world.hitStop - dt);
@@ -1145,20 +1272,35 @@ function updateWorld(world: World, dt: number) {
     world.player.update(dt);
     if (world.phaseTimer <= 0) {
       world.encounterIndex += 1;
-      world.player.hp = Math.min(100, world.player.hp + 14);
       world.player.stamina = 100;
       world.enemy.hp = 0;
-      world.journeyPhase = 'TRAVEL';
-      world.phaseTimer = 1.65;
-      world.encounterResolved = false;
-      world.banner = {
-        text: 'ADVANCE',
-        subtext: `下一戰 ${world.encounterIndex + 1}/${world.encounterTotal}`,
-        color: '#67e8f9',
-        life: 0.85,
-      };
+      const reachedCheckpoint = world.minionsDefeated % 5 === 0;
+      world.journeyPhase = reachedCheckpoint ? 'CHECKPOINT' : 'TRAVEL';
+      world.phaseTimer = reachedCheckpoint ? 0 : 1.65;
+      world.encounterResolved = reachedCheckpoint;
+      world.banner = reachedCheckpoint
+        ? {
+            text: 'CHECKPOINT',
+            subtext: '進入商店，或直接繼續前進',
+            color: '#fbbf24',
+            life: 999,
+          }
+        : {
+            text: 'ADVANCE',
+            subtext: `下一戰 ${world.encounterIndex + 1}/${world.encounterTotal}`,
+            color: '#67e8f9',
+            life: 0.85,
+          };
       emitJourney(world);
     }
+    world.justPressed.clear();
+    return;
+  }
+
+  if (world.journeyPhase === 'CHECKPOINT' || world.journeyPhase === 'SHOP') {
+    world.player.moveIntent = 0;
+    world.player.crouching = false;
+    world.player.state = 'IDLE';
     world.justPressed.clear();
     return;
   }
@@ -1315,6 +1457,46 @@ function drawActionFrame(
   );
 }
 
+function drawPlayerActionFrame(
+  ctx: CanvasRenderingContext2D,
+  sheet: HTMLImageElement,
+  frame: number,
+  size: number,
+  rect: readonly [number, number, number, number],
+  groundOffset = 0,
+) {
+  const [rawX, rawY, rawWidth, rawHeight] = rect;
+  const padding = 2;
+  const sourceX = Math.max(0, rawX - padding);
+  const sourceY = Math.max(0, rawY - padding);
+  const sourceRight = Math.min(sheet.width, rawX + rawWidth + padding);
+  const sourceBottom = Math.min(sheet.height, rawY + rawHeight + padding);
+  const sourceWidth = sourceRight - sourceX;
+  const sourceHeight = sourceBottom - sourceY;
+  const nominalCellWidth = sheet.width / 4;
+  const nominalCellHeight = sheet.height / 2;
+  const scale = size / nominalCellHeight;
+  const column = frame % 4;
+  const row = Math.floor(frame / 4);
+  const drawX =
+    (-nominalCellWidth * scale) / 2 +
+    (sourceX - column * nominalCellWidth) * scale;
+  const drawY =
+    -size + (sourceY - row * nominalCellHeight) * scale + groundOffset;
+
+  ctx.drawImage(
+    sheet,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    drawX,
+    drawY,
+    sourceWidth * scale,
+    sourceHeight * scale,
+  );
+}
+
 function drawEnemyActionFrame(
   ctx: CanvasRenderingContext2D,
   sheet: HTMLImageElement,
@@ -1388,6 +1570,29 @@ function drawGunFrame(
   );
 }
 
+function drawWalkFrame(
+  ctx: CanvasRenderingContext2D,
+  sheet: HTMLImageElement,
+  frame: number,
+  height: number,
+) {
+  const sourceWidth = sheet.width / 4;
+  const sourceY = sheet.height * 0.1;
+  const sourceHeight = sheet.height * 0.76;
+  const width = height * (sourceWidth / sourceHeight);
+  ctx.drawImage(
+    sheet,
+    frame * sourceWidth,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    -width / 2,
+    -height + 3,
+    width,
+    height,
+  );
+}
+
 function drawFighter(
   ctx: CanvasRenderingContext2D,
   world: World,
@@ -1406,6 +1611,13 @@ function drawFighter(
   const baseY = GROUND_Y;
   const isCrouchPose =
     fighter.crouching && !isHitPose && !isGuardPose && !attack;
+  const isWalking =
+    fighter.id === 'player' &&
+    !attack &&
+    !isHitPose &&
+    !isGuardPose &&
+    !isCrouchPose &&
+    (fighter.state === 'MOVE_FORWARD' || fighter.state === 'MOVE_BACKWARD');
   const useGunPose =
     fighter.id === 'player' &&
     (world.gunMode || attack?.attackType === 'GUN') &&
@@ -1418,7 +1630,6 @@ function drawFighter(
     : isKai
       ? world.maleActionSheet
       : world.actionSheet;
-  const combatSheetRows = isEnemy || isKai ? 3 : 2;
   const attackTotal = attack
     ? attack.startupFrames + attack.activeFrames + attack.recoveryFrames
     : 1;
@@ -1518,6 +1729,14 @@ function drawFighter(
         1,
         PLAYER_GUARD_GROUND_OFFSETS[3],
       );
+  } else if (isWalking) {
+    const walkFrame = Math.floor(world.animationTime * 7.5) % 4;
+    drawWalkFrame(
+      ctx,
+      world.walkSheets[world.playerCharacter],
+      walkFrame,
+      PLAYER_WALK_SIZE,
+    );
   } else if (useGunPose)
     drawGunFrame(
       ctx,
@@ -1534,13 +1753,12 @@ function drawFighter(
       enemyFrameRects[frame],
     );
   else
-    drawActionFrame(
+    drawPlayerActionFrame(
       ctx,
       combatSheet,
       frame,
       actionSize,
-      0,
-      combatSheetRows,
+      PLAYER_FRAME_RECTS[frame] ?? PLAYER_FRAME_RECTS[0],
       actionGroundOffset,
     );
   ctx.restore();
@@ -1571,8 +1789,7 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
   const shakeY =
     world.shake > 0 ? (Math.random() - 0.5) * world.shake * 0.45 : 0;
   ctx.translate(shakeX, shakeY);
-  const stageOffset =
-    world.journeyPhase === 'TRAVEL' ? -(world.stageScroll % WIDTH) : 0;
+  const stageOffset = -(world.stageScroll % WIDTH);
   ctx.drawImage(world.stage, stageOffset, 0, WIDTH, HEIGHT);
   if (stageOffset < 0)
     ctx.drawImage(world.stage, stageOffset + WIDTH, 0, WIDTH, HEIGHT);
@@ -1625,7 +1842,9 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
   ctx.fillText(
     world.journeyPhase === 'TRAVEL'
       ? 'NEXT ENEMY…'
-      : world.ai.name.toUpperCase(),
+      : world.journeyPhase === 'CHECKPOINT' || world.journeyPhase === 'SHOP'
+        ? 'SUPPLY CHECKPOINT'
+        : world.ai.name.toUpperCase(),
     WIDTH - 54,
     38,
   );
@@ -1666,7 +1885,7 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
   ctx.fillText(
     world.gunMode
       ? `PISTOL // ${world.ammo} SHOTS`
-      : 'BARE HANDS // E TO SWITCH',
+      : `BARE HANDS // $${world.cash} // DRINK ${world.energyDrinks}`,
     WIDTH / 2,
     68,
   );
@@ -1720,9 +1939,13 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
     if (world.status === 'READY') {
       ctx.font = '700 14px ui-monospace, monospace';
       ctx.fillStyle = '#f8fafc';
-      ctx.fillText('6 ENCOUNTERS // FINAL BOSS', WIDTH / 2, 365);
+      ctx.fillText('10 MINIONS // 2 SHOPS // FINAL BOSS', WIDTH / 2, 365);
       ctx.fillStyle = 'rgba(226, 232, 240, .7)';
-      ctx.fillText('E 切換拳槍 · 槍共 6 發 · 子彈用完自動出拳', WIDTH / 2, 392);
+      ctx.fillText(
+        'E 切換拳槍 · V 使用飲料 · 子彈用完自動出拳',
+        WIDTH / 2,
+        392,
+      );
       ctx.font = '900 20px ui-sans-serif, system-ui';
       ctx.fillStyle = world.playerCharacter === 'fio' ? '#67e8f9' : '#fbbf24';
       ctx.fillText(
@@ -1759,6 +1982,8 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
       `GRAPPLE ${world.grapple ? `${Math.max(0, world.grapple.timer).toFixed(2)}s` : 'OFF'}`,
       `GUN     ${world.gunMode ? 'ON' : 'OFF'}`,
       `AMMO    ${world.ammo}/${world.maxAmmo}`,
+      `CASH    $${world.cash}`,
+      `DRINK   ${world.energyDrinks}`,
       `BOXES   ${world.showBoxes ? 'ON' : 'OFF'}`,
     ];
     ctx.textAlign = 'left';
@@ -1799,6 +2024,9 @@ export function KarateGame() {
     encounter: 1,
     total: ENCOUNTER_TOTAL,
     ammo: 6,
+    cash: 0,
+    energyDrinks: 0,
+    minionsDefeated: 0,
     phase: 'TRAVEL',
     complete: false,
   });
@@ -1872,6 +2100,8 @@ export function KarateGame() {
         playerGuardSheet,
         fioGunSheet,
         kaiGunSheet,
+        fioWalkSheet,
+        kaiWalkSheet,
       ] = await Promise.all([
         fetch('/game-data/attacks.json'),
         fetch('/game-data/ai.json'),
@@ -1884,6 +2114,8 @@ export function KarateGame() {
         loadImage('/fio-guards-v2.png'),
         loadImage('/fio-gun-actions-v6.png'),
         loadImage('/kai-gun-actions-v2.png'),
+        loadImage('/fio-walk-v1.png'),
+        loadImage('/kai-walk-v1.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
       const aiPayload = (await aiResponse.json()) as AIData[] | AIData;
@@ -1915,6 +2147,7 @@ export function KarateGame() {
         playerGuardSheet,
         maleActionSheet: quickFistSheet,
         gunSheets: { fio: fioGunSheet, kai: kaiGunSheet },
+        walkSheets: { fio: fioWalkSheet, kai: kaiWalkSheet },
         status: 'READY',
         previousStatus: 'READY',
         keys: new Set(),
@@ -1931,8 +2164,12 @@ export function KarateGame() {
         journeyPhase: 'TRAVEL',
         phaseTimer: 0,
         stageScroll: 0,
+        animationTime: 0,
         ammo: 6,
         maxAmmo: 6,
+        cash: 0,
+        energyDrinks: 0,
+        minionsDefeated: 0,
         encounterResolved: false,
         matchOver: false,
         hitStop: 0,
@@ -1956,6 +2193,9 @@ export function KarateGame() {
         encounter: 1,
         total: ENCOUNTER_TOTAL,
         ammo: 6,
+        cash: 0,
+        energyDrinks: 0,
+        minionsDefeated: 0,
         phase: 'TRAVEL',
         complete: false,
       });
@@ -1995,6 +2235,7 @@ export function KarateGame() {
         'q',
         'w',
         'e',
+        'v',
       ];
       if (gameKeys.includes(key)) event.preventDefault();
       if (!world.keys.has(key)) {
@@ -2004,6 +2245,7 @@ export function KarateGame() {
       if (key === 'enter' && world.status === 'READY') resetWorld(world);
       if (key === 'r') resetWorld(world);
       if (key === 'e' && !event.repeat) toggleWeapon(world);
+      if (key === 'v' && !event.repeat) consumeEnergyDrink(world);
       if (key === 'p' && world.status === 'FIGHTING') {
         world.previousStatus = world.status;
         setStatus(world, 'PAUSED');
@@ -2085,6 +2327,38 @@ export function KarateGame() {
     canvasRef.current?.focus();
   }, []);
 
+  const useDrinkControl = useCallback(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    consumeEnergyDrink(world);
+    canvasRef.current?.focus();
+  }, []);
+
+  const enterShopControl = useCallback(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    enterShop(world);
+  }, []);
+
+  const continueJourneyControl = useCallback(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    continueJourney(world);
+    canvasRef.current?.focus();
+  }, []);
+
+  const buyDrinkControl = useCallback(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    buyEnergyDrink(world);
+  }, []);
+
+  const buyAmmoControl = useCallback(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    buyAmmoPack(world);
+  }, []);
+
   const toggleDebug = useCallback(() => {
     const world = worldRef.current;
     if (!world) return;
@@ -2149,11 +2423,14 @@ export function KarateGame() {
           <p
             className={`mr-2 mt-2 inline-flex rounded-full border px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.2em] ${gunMode ? 'border-cyan-300/35 bg-cyan-300/10 text-cyan-200' : 'border-amber-300/25 bg-amber-300/10 text-amber-200'}`}
           >
-            {gunMode ? `Pistol · ${journeyView.ammo}/6` : 'Bare Hands'}
+            {gunMode ? `Pistol · ${journeyView.ammo} 發` : 'Bare Hands'}
           </p>
           <p className="mt-2 inline-flex rounded-full border border-white/10 bg-white/[.04] px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-slate-300">
             {PLAYER_NAMES[playerCharacter]} · Stage {journeyView.encounter}/
             {journeyView.total} · {journeyView.phase}
+          </p>
+          <p className="ml-2 mt-2 inline-flex rounded-full border border-emerald-300/20 bg-emerald-300/[.07] px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-emerald-200">
+            ${journeyView.cash} · 飲料 ×{journeyView.energyDrinks}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -2182,7 +2459,15 @@ export function KarateGame() {
             disabled={status === 'LOADING' || status === 'ERROR'}
           >
             <Crosshair />{' '}
-            {gunMode ? '切回拳腳' : `裝備手槍 ${journeyView.ammo}/6`}
+            {gunMode ? '切回拳腳' : `裝備手槍 ${journeyView.ammo} 發`}
+          </Button>
+          <Button
+            onClick={useDrinkControl}
+            variant="outline"
+            size="lg"
+            disabled={journeyView.energyDrinks <= 0 || journeyView.complete}
+          >
+            <HeartPulse /> 補血 ×{journeyView.energyDrinks}
           </Button>
           <Button
             onClick={toggleDebug}
@@ -2249,10 +2534,14 @@ export function KarateGame() {
           <span className="rival-tendency">拳腳完整 · 現代雙手持槍</span>
         </button>
         <div className="rival-card journey-card" aria-label="闖關規則">
-          <span className="rival-index text-rose-300">ROUTE // 6 戰</span>
+          <span className="rival-index text-rose-300">ROUTE // 11 戰</span>
           <strong>一路前進，最後打 Boss</strong>
-          <small>前五名敵人血量較少、攻擊較單純；最後一戰攻勢完整。</small>
-          <span className="rival-tendency">過關回復 14 HP · 手槍共 6 發</span>
+          <small>
+            十名小兵逐步增強；每打倒一人獲得 $10，最後一戰挑戰 Boss。
+          </small>
+          <span className="rival-tendency">
+            每 5 人可進商店 · 飲料與子彈包各 $20
+          </span>
         </div>
       </div>
 
@@ -2286,6 +2575,65 @@ export function KarateGame() {
             <div className="text-center">
               <p className="text-5xl font-black text-cyan-200">PAUSED</p>
               <p className="mt-2 font-mono text-sm text-slate-300">按 P 繼續</p>
+            </div>
+          </div>
+        )}
+        {journeyView.phase === 'CHECKPOINT' && (
+          <div className="checkpoint-overlay" aria-label="闖關檢查點">
+            <div className="checkpoint-card">
+              <span>CHECKPOINT // 已擊倒 {journeyView.minionsDefeated} 人</span>
+              <h2>現金 ${journeyView.cash}</h2>
+              <p>要進商店補充物資，還是直接迎戰下一位敵人？</p>
+              <div>
+                <button type="button" onClick={enterShopControl}>
+                  <ShoppingCart /> 進入商店
+                </button>
+                <button type="button" onClick={continueJourneyControl}>
+                  繼續前進
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {journeyView.phase === 'SHOP' && (
+          <div className="checkpoint-overlay" aria-label="補給商店">
+            <div className="checkpoint-card shop-card">
+              <span>SUPPLY SHOP // 現金 ${journeyView.cash}</span>
+              <h2>選擇補給品</h2>
+              <div className="shop-grid">
+                <button
+                  type="button"
+                  onClick={buyDrinkControl}
+                  disabled={journeyView.cash < ENERGY_DRINK_COST}
+                >
+                  <HeartPulse />
+                  <strong>能量飲料</strong>
+                  <small>
+                    隨時補 {ENERGY_DRINK_HEAL} HP · 已有{' '}
+                    {journeyView.energyDrinks}
+                  </small>
+                  <b>${ENERGY_DRINK_COST}</b>
+                </button>
+                <button
+                  type="button"
+                  onClick={buyAmmoControl}
+                  disabled={journeyView.cash < AMMO_PACK_COST}
+                >
+                  <Crosshair />
+                  <strong>子彈包</strong>
+                  <small>
+                    增加 {AMMO_PACK_SIZE} 發 · 現有 {journeyView.ammo}
+                  </small>
+                  <b>${AMMO_PACK_COST}</b>
+                </button>
+              </div>
+              <button
+                type="button"
+                className="leave-shop-button"
+                onClick={continueJourneyControl}
+              >
+                離開商店，繼續前進
+              </button>
             </div>
           </div>
         )}
@@ -2338,6 +2686,15 @@ export function KarateGame() {
             >
               <Crosshair />
               <span>{gunMode ? '拳腳' : `手槍 ${journeyView.ammo}`}</span>
+            </button>
+            <button
+              className="mobile-energy-button"
+              onClick={useDrinkControl}
+              disabled={journeyView.energyDrinks <= 0 || journeyView.complete}
+              aria-label="使用能量飲料補血"
+            >
+              <HeartPulse />
+              <span>補血 {journeyView.energyDrinks}</span>
             </button>
             <div className="mobile-attack-pad" aria-label="攻擊控制">
               {activeKeyLabels.map(({ input, label, tone }) => (
@@ -2433,6 +2790,15 @@ export function KarateGame() {
             <kbd>E</kbd>
             <span>{gunMode ? '拳腳' : `手槍 ${journeyView.ammo}`}</span>
           </button>
+          <button
+            className="attack-button energy"
+            aria-label="使用能量飲料補血，鍵盤 V"
+            onClick={useDrinkControl}
+            disabled={journeyView.energyDrinks <= 0 || journeyView.complete}
+          >
+            <kbd>V</kbd>
+            <span>補血 {journeyView.energyDrinks}</span>
+          </button>
         </div>
       </div>
 
@@ -2442,7 +2808,10 @@ export function KarateGame() {
             ? '自動前進中 · 敵人出現後開戰'
             : `目前對手 · ${activeOpponent?.archetype ?? '載入中'}`}
         </p>
-        <p>方向鍵移動／選段位 · Q 拳或射擊 · W 腳 · E 切換武器 · R 重新闖關</p>
+        <p>
+          方向鍵移動／選段位 · Q 拳或射擊 · W 腳 · E 切換武器 · V 補血 · R
+          重新闖關
+        </p>
       </footer>
       {showInstallHelp && (
         <div className="install-help-backdrop">
