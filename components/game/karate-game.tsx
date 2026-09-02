@@ -19,6 +19,7 @@ import {
 const WIDTH = 1280;
 const HEIGHT = 720;
 const GROUND_Y = 620;
+const FIGHTER_STAGE_MARGIN = 248;
 const FPS = 60;
 
 type AttackLevel = 'HIGH' | 'MID' | 'LOW';
@@ -178,14 +179,26 @@ const PLAYER_GUARD_SIZE = 420;
 const PLAYER_GUN_SIZE = 359;
 const PLAYER_GUN_GROUND_OFFSET = 3;
 const ENEMY_ACTION_SIZES = [372, 367, 375] as const;
+const ENEMY_FRAME_RECTS = [
+  [
+    [132, 15, 192, 289], [538, 16, 257, 287], [990, 19, 234, 285], [1370, 106, 298, 196],
+    [105, 326, 264, 253], [518, 320, 279, 260], [963, 412, 279, 161], [1419, 328, 187, 250],
+    [127, 598, 188, 256], [559, 615, 164, 238], [1019, 667, 153, 186], [1365, 753, 304, 105],
+  ],
+  [
+    [112, 11, 201, 331], [449, 13, 321, 327], [895, 25, 305, 315], [1260, 124, 331, 218],
+    [94, 358, 276, 294], [468, 353, 286, 298], [869, 454, 357, 191], [1359, 342, 171, 306],
+    [56, 662, 267, 245], [454, 676, 196, 232], [912, 708, 183, 202], [1227, 792, 415, 125],
+  ],
+  [
+    [141, 17, 214, 317], [543, 17, 310, 315], [942, 32, 297, 302], [1377, 134, 278, 198],
+    [112, 343, 260, 264], [531, 337, 265, 272], [912, 421, 333, 188], [1365, 377, 278, 234],
+    [154, 627, 224, 229], [558, 644, 200, 212], [937, 665, 297, 190], [1323, 729, 353, 128],
+  ],
+] as const;
 const PLAYER_ACTION_GROUND_OFFSETS = [15, 17, 16, 18, 37, 36, 34, 32] as const;
 const PLAYER_REACTION_GROUND_OFFSETS = [35, 34, 35, 37] as const;
 const PLAYER_GUARD_GROUND_OFFSETS = [25, 31, 28, 31] as const;
-const ENEMY_ACTION_GROUND_OFFSETS = [
-  [0, 0, 0, 0, 15, 14, 23, 16, 43, 43, 43, 38],
-  [0, 0, 0, 0, 0, 0, 0, 0, 59, 58, 53, 47],
-  [0, 0, 0, 0, 0, 0, 0, 0, 39, 39, 41, 38],
-] as const;
 const attackInputByLevel: Record<'PUNCH' | 'KICK' | 'GUN', Record<AttackLevel, string>> = {
   PUNCH: { HIGH: 'q', MID: 'a', LOW: 'z' },
   KICK: { HIGH: 'w', MID: 's', LOW: 'x' },
@@ -877,13 +890,26 @@ function updateWorld(world: World, dt: number) {
   world.enemy.update(dt);
   updateProjectiles(world, dt);
 
-  world.player.x = clamp(world.player.x, 104, WIDTH - 104);
-  world.enemy.x = clamp(world.enemy.x, 104, WIDTH - 104);
+  world.player.x = clamp(world.player.x, FIGHTER_STAGE_MARGIN, WIDTH - FIGHTER_STAGE_MARGIN);
+  world.enemy.x = clamp(world.enemy.x, FIGHTER_STAGE_MARGIN, WIDTH - FIGHTER_STAGE_MARGIN);
   const separation = Math.abs(world.player.x - world.enemy.x);
   if (separation < 68) {
     const midpoint = (world.player.x + world.enemy.x) / 2;
     world.player.x = midpoint - 34 * world.player.direction;
     world.enemy.x = midpoint + 34 * world.player.direction;
+  }
+
+  const leftmost = Math.min(world.player.x, world.enemy.x);
+  if (leftmost < FIGHTER_STAGE_MARGIN) {
+    const correction = FIGHTER_STAGE_MARGIN - leftmost;
+    world.player.x += correction;
+    world.enemy.x += correction;
+  }
+  const rightmost = Math.max(world.player.x, world.enemy.x);
+  if (rightmost > WIDTH - FIGHTER_STAGE_MARGIN) {
+    const correction = rightmost - (WIDTH - FIGHTER_STAGE_MARGIN);
+    world.player.x -= correction;
+    world.enemy.x -= correction;
   }
 
   if (!tryGrapple(world)) {
@@ -970,6 +996,42 @@ function drawActionFrame(
   );
 }
 
+function drawEnemyActionFrame(
+  ctx: CanvasRenderingContext2D,
+  sheet: HTMLImageElement,
+  frame: number,
+  size: number,
+  rect: readonly [number, number, number, number],
+  xOffset = 0,
+) {
+  const [rawX, rawY, rawWidth, rawHeight] = rect;
+  const padding = 2;
+  const sourceX = Math.max(0, rawX - padding);
+  const sourceY = Math.max(0, rawY - padding);
+  const sourceRight = Math.min(sheet.width, rawX + rawWidth + padding);
+  const sourceBottom = Math.min(sheet.height, rawY + rawHeight + padding);
+  const sourceWidth = sourceRight - sourceX;
+  const sourceHeight = sourceBottom - sourceY;
+  const nominalCellWidth = sheet.width / 4;
+  const nominalCellHeight = sheet.height / 3;
+  const scale = size / nominalCellHeight;
+  const column = frame % 4;
+  const drawX = -nominalCellWidth * scale / 2 + (sourceX - column * nominalCellWidth) * scale + xOffset;
+  const drawY = -(rawY + rawHeight - sourceY) * scale;
+
+  ctx.drawImage(
+    sheet,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    drawX,
+    drawY,
+    sourceWidth * scale,
+    sourceHeight * scale,
+  );
+}
+
 function gunFrameFor(fighter: Fighter) {
   if (!fighter.attack || fighter.attack.data.attackType !== 'GUN') return 0;
   const { data, frame } = fighter.attack;
@@ -1002,7 +1064,6 @@ function drawGunFrame(
 
 function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fighter) {
   const isEnemy = fighter.id === 'enemy';
-  const phase = fighter.phase;
   const attack = fighter.attack?.data;
   const frame = actionFrameFor(fighter);
   const reactionFrame = reactionFrameFor(fighter);
@@ -1028,11 +1089,9 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
     ? fighter.direction * actionPulse * (attack.attackType === 'KICK' ? -0.055 : -0.025)
     : 0;
   const enemyActionSize = ENEMY_ACTION_SIZES[world.aiIndex] ?? ENEMY_ACTION_SIZES[0];
-  const enemyGroundOffsets = ENEMY_ACTION_GROUND_OFFSETS[world.aiIndex] ?? ENEMY_ACTION_GROUND_OFFSETS[0];
+  const enemyFrameRects = ENEMY_FRAME_RECTS[world.aiIndex] ?? ENEMY_FRAME_RECTS[0];
   const actionSize = isEnemy ? enemyActionSize : PLAYER_ACTION_SIZE;
-  const actionGroundOffset = isEnemy
-    ? enemyGroundOffsets[frame] ?? 0
-    : PLAYER_ACTION_GROUND_OFFSETS[frame] ?? PLAYER_ACTION_GROUND_OFFSETS[0];
+  const actionGroundOffset = PLAYER_ACTION_GROUND_OFFSETS[frame] ?? PLAYER_ACTION_GROUND_OFFSETS[0];
 
   ctx.save();
   ctx.globalAlpha = 0.38;
@@ -1046,52 +1105,27 @@ function drawFighter(ctx: CanvasRenderingContext2D, world: World, fighter: Fight
   ctx.translate(fighter.x + fighter.direction * activeThrust, baseY);
   ctx.rotate(attackRotation);
   ctx.scale(fighter.direction, 1);
-  if (!useGunPose && frame !== 0 && (phase === 'ACTIVE' || phase === 'RECOVERY')) {
-    for (let trail = 3; trail >= 1; trail -= 1) {
-      ctx.save();
-      ctx.globalAlpha = 0.055 * trail;
-      drawActionFrame(ctx, combatSheet, frame, actionSize, -trail * 18, combatSheetRows, actionGroundOffset);
-      ctx.restore();
-    }
-  }
   if (isHitPose && reactionFrame !== null) {
     if (isEnemy) {
       const enemyReactionFrame = reactionFrame + 8;
-      drawActionFrame(ctx, combatSheet, enemyReactionFrame, enemyActionSize, 0, 3, enemyGroundOffsets[enemyReactionFrame] ?? 0);
+      drawEnemyActionFrame(ctx, combatSheet, enemyReactionFrame, enemyActionSize, enemyFrameRects[enemyReactionFrame]);
     } else {
       drawActionFrame(ctx, world.playerReactionSheet, reactionFrame, PLAYER_REACTION_SIZE, 0, 1, PLAYER_REACTION_GROUND_OFFSETS[reactionFrame] ?? 0);
     }
   } else if (isGuardPose && guardFrame !== null) {
     if (isEnemy) {
       const enemyGuardFrame = guardFrame + 7;
-      drawActionFrame(ctx, combatSheet, enemyGuardFrame, enemyActionSize, 0, 3, enemyGroundOffsets[enemyGuardFrame] ?? 0);
+      drawEnemyActionFrame(ctx, combatSheet, enemyGuardFrame, enemyActionSize, enemyFrameRects[enemyGuardFrame]);
     } else {
       drawActionFrame(ctx, world.playerGuardSheet, guardFrame, PLAYER_GUARD_SIZE, 0, 1, PLAYER_GUARD_GROUND_OFFSETS[guardFrame] ?? 0);
     }
   } else if (isCrouchPose) {
-    if (isEnemy) drawActionFrame(ctx, combatSheet, 10, enemyActionSize, 0, 3, enemyGroundOffsets[10] ?? 0);
+    if (isEnemy) drawEnemyActionFrame(ctx, combatSheet, 10, enemyActionSize, enemyFrameRects[10]);
     else drawActionFrame(ctx, world.playerGuardSheet, 3, PLAYER_GUARD_SIZE, 0, 1, PLAYER_GUARD_GROUND_OFFSETS[3]);
   } else if (useGunPose) drawGunFrame(ctx, world.gunSheet, gunFrame, PLAYER_GUN_SIZE);
+  else if (isEnemy) drawEnemyActionFrame(ctx, combatSheet, frame, enemyActionSize, enemyFrameRects[frame]);
   else drawActionFrame(ctx, combatSheet, frame, actionSize, 0, combatSheetRows, actionGroundOffset);
   ctx.restore();
-
-  if (attack && phase === 'ACTIVE') {
-    const box = fighter.attackBox();
-    if (box) {
-      ctx.save();
-      ctx.strokeStyle = attack.attackType === 'KICK' ? '#fb7185' : '#fbbf24';
-      ctx.lineWidth = attack.attackType === 'KICK' ? 9 : 6;
-      ctx.globalAlpha = 0.7;
-      ctx.beginPath();
-      const startX = fighter.x + fighter.direction * 30;
-      const endX = fighter.direction === 1 ? box.x + box.w : box.x;
-      const y = box.y + box.h / 2;
-      ctx.moveTo(startX, y + 14);
-      ctx.quadraticCurveTo((startX + endX) / 2, y - 22, endX, y);
-      ctx.stroke();
-      ctx.restore();
-    }
-  }
 
   if (world.showBoxes) {
     const boxes = fighter.hurtboxes();
@@ -1161,24 +1195,6 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
 
   drawFighter(ctx, world, world.enemy);
   drawFighter(ctx, world, world.player);
-
-  for (const impact of world.impacts) {
-    const progress = impact.life / 0.55;
-    ctx.save();
-    ctx.translate(impact.x, impact.y);
-    ctx.strokeStyle = impact.color;
-    ctx.lineWidth = 4;
-    ctx.globalAlpha = clamp(progress, 0, 1);
-    for (let i = 0; i < 9; i += 1) {
-      const angle = (Math.PI * 2 * i) / 9;
-      const radius = (1 - progress) * 48 + 9;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(angle) * 7, Math.sin(angle) * 7);
-      ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
   ctx.restore();
 
   const topGradient = ctx.createLinearGradient(0, 0, 0, 125);
