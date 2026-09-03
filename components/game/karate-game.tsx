@@ -2665,6 +2665,10 @@ export function KarateGame() {
           aria-label="霓虹空手道遊戲畫面"
           className="game-canvas block aspect-video h-auto w-full outline-none ring-cyan-300/50 focus-visible:ring-2"
         />
+        <output className="mobile-portrait-hint">
+          <Smartphone aria-hidden="true" />
+          <span>橫放手機，即可顯示虛擬按鍵</span>
+        </output>
         {(status === 'LOADING' || status === 'ERROR') && (
           <div className="absolute inset-0 grid place-items-center bg-slate-950/80 backdrop-blur-sm">
             <div className="px-6 text-center">

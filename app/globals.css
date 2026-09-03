@@ -322,6 +322,40 @@ button {
   display: none;
 }
 
+.mobile-portrait-hint {
+  display: none;
+}
+
+@media (orientation: portrait) and (max-width: 760px) {
+  .mobile-portrait-hint {
+    position: absolute;
+    top: 0.65rem;
+    left: 50%;
+    z-index: 25;
+    display: flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.4rem;
+    transform: translateX(-50%);
+    border: 1px solid rgba(103, 232, 249, 0.48);
+    border-radius: 999px;
+    background: rgba(2, 6, 23, 0.8);
+    padding: 0.55rem 0.85rem;
+    color: #cffafe;
+    font-size: 0.75rem;
+    font-weight: 900;
+    white-space: nowrap;
+    pointer-events: none;
+    box-shadow: 0 0 24px rgba(34, 211, 238, 0.14);
+    backdrop-filter: blur(8px);
+  }
+
+  .mobile-portrait-hint svg {
+    width: 1rem;
+    height: 1rem;
+  }
+}
+
 .checkpoint-overlay {
   position: absolute;
   inset: 0;
@@ -620,9 +654,9 @@ button {
     bottom: max(0.75rem, env(safe-area-inset-bottom));
     left: max(1rem, env(safe-area-inset-left));
     display: grid;
-    width: clamp(8.5rem, 22vw, 11.5rem);
-    grid-template-columns: repeat(3, minmax(2.8rem, 1fr));
-    gap: 0.38rem;
+    width: clamp(9.25rem, 23vw, 12rem);
+    grid-template-columns: repeat(3, minmax(3rem, 1fr));
+    gap: 0.42rem;
   }
 
   .mobile-dpad button,
@@ -643,7 +677,7 @@ button {
   }
 
   .mobile-dpad button {
-    min-height: 2.9rem;
+    min-height: 3rem;
     border-radius: 0.85rem;
     font-size: 1.3rem;
     font-weight: 900;
@@ -717,7 +751,7 @@ button {
     top: max(0.7rem, env(safe-area-inset-top));
     left: 50%;
     min-width: 8rem;
-    min-height: 2.6rem;
+    min-height: 2.75rem;
     padding: 0.45rem 1rem;
     transform: translateX(-50%);
     border-color: rgba(103, 232, 249, 0.78);
@@ -733,7 +767,7 @@ button {
     top: max(0.7rem, env(safe-area-inset-top));
     right: max(1rem, env(safe-area-inset-right));
     display: flex;
-    min-height: 2.5rem;
+    min-height: 2.75rem;
     align-items: center;
     gap: 0.35rem;
     padding: 0.4rem 0.75rem;
@@ -747,7 +781,7 @@ button {
     top: max(3.7rem, calc(env(safe-area-inset-top) + 3.2rem));
     right: max(1rem, env(safe-area-inset-right));
     display: flex;
-    min-height: 2.45rem;
+    min-height: 2.75rem;
     align-items: center;
     gap: 0.35rem;
     padding: 0.4rem 0.7rem;
@@ -763,7 +797,7 @@ button {
     top: max(6.6rem, calc(env(safe-area-inset-top) + 6.1rem));
     right: max(1rem, env(safe-area-inset-right));
     display: flex;
-    min-height: 2.45rem;
+    min-height: 2.75rem;
     align-items: center;
     gap: 0.35rem;
     padding: 0.4rem 0.7rem;
@@ -792,7 +826,7 @@ button {
 
 @media (orientation: landscape) and (max-height: 420px) {
   .mobile-dpad button {
-    min-height: 2.55rem;
+    min-height: 3rem;
   }
 
   .mobile-attack-pad {
@@ -801,15 +835,15 @@ button {
   }
 
   .mobile-attack-pad button {
-    width: 3.8rem;
-    height: 3.8rem;
+    width: 4.25rem;
+    height: 4.25rem;
   }
 
   .mobile-attack-pad button:nth-child(1) {
-    right: 4rem;
+    right: 4.45rem;
   }
 
   .mobile-attack-pad button:nth-child(2) {
-    bottom: 2.1rem;
+    bottom: 2.25rem;
   }
 }
