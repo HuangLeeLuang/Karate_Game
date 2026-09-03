@@ -147,6 +147,8 @@ interface JourneyView {
   cash: number;
   energyDrinks: number;
   minionsDefeated: number;
+  bonusMinions: number;
+  bossGate: boolean;
   phase: JourneyPhase;
   complete: boolean;
 }
@@ -169,6 +171,7 @@ interface World {
   actionSheet: HTMLImageElement;
   playerReactionSheet: HTMLImageElement;
   enemySheets: HTMLImageElement[];
+  enemyWalkSheets: HTMLImageElement[];
   playerGuardSheet: HTMLImageElement;
   maleActionSheet: HTMLImageElement;
   gunSheets: Record<PlayerCharacter, HTMLImageElement>;
@@ -195,6 +198,9 @@ interface World {
   cash: number;
   energyDrinks: number;
   minionsDefeated: number;
+  bonusMinions: number;
+  bossQueued: boolean;
+  currentIsBoss: boolean;
   encounterResolved: boolean;
   matchOver: boolean;
   hitStop: number;
@@ -219,6 +225,7 @@ const PLAYER_GUARD_SIZE = 420;
 const PLAYER_GUN_SIZE = 359;
 const PLAYER_GUN_GROUND_OFFSET = 3;
 const PLAYER_WALK_SIZE = 405;
+const ENEMY_WALK_SIZES = [388, 388, 398] as const;
 const ENEMY_ACTION_SIZES = [372, 367, 375] as const;
 const ENEMY_FRAME_RECTS = [
   [
@@ -548,6 +555,8 @@ function emitJourney(world: World) {
     cash: world.cash,
     energyDrinks: world.energyDrinks,
     minionsDefeated: world.minionsDefeated,
+    bonusMinions: world.bonusMinions,
+    bossGate: world.encounterIndex >= MINION_TOTAL && !world.matchOver,
     phase: world.journeyPhase,
     complete: world.matchOver,
   });
@@ -586,17 +595,58 @@ function enterShop(world: World) {
 function continueJourney(world: World) {
   if (world.journeyPhase !== 'CHECKPOINT' && world.journeyPhase !== 'SHOP')
     return;
+  const headingToBoss = world.encounterIndex >= MINION_TOTAL;
+  world.bossQueued = headingToBoss;
   world.journeyPhase = 'TRAVEL';
   world.phaseTimer = 1.65;
   world.encounterResolved = false;
   world.banner = {
-    text: 'ADVANCE',
-    subtext: `下一戰 ${world.encounterIndex + 1}/${world.encounterTotal}`,
-    color: '#67e8f9',
+    text: headingToBoss ? 'BOSS AHEAD' : 'ADVANCE',
+    subtext: headingToBoss
+      ? '前往最終決戰'
+      : `下一戰 ${world.encounterIndex + 1}/${world.encounterTotal}`,
+    color: headingToBoss ? '#fb7185' : '#67e8f9',
     life: 0.85,
   };
   emitJourney(world);
   playTone(world, 420, 0.08, 0.03);
+}
+
+function farmMinion(world: World) {
+  if (
+    world.journeyPhase !== 'CHECKPOINT' ||
+    world.encounterIndex < MINION_TOTAL
+  )
+    return;
+  world.bossQueued = false;
+  world.journeyPhase = 'TRAVEL';
+  world.phaseTimer = 1.25;
+  world.encounterResolved = false;
+  world.banner = {
+    text: 'BONUS FIGHT',
+    subtext: `再打倒一名小兵可獲得 $${MINION_REWARD}`,
+    color: '#fbbf24',
+    life: 0.95,
+  };
+  emitJourney(world);
+  playTone(world, 460, 0.09, 0.03);
+}
+
+function leaveShop(world: World) {
+  if (world.journeyPhase !== 'SHOP') return;
+  if (world.encounterIndex < MINION_TOTAL) {
+    continueJourney(world);
+    return;
+  }
+  world.journeyPhase = 'CHECKPOINT';
+  world.banner = {
+    text: 'BOSS GATE',
+    subtext: '挑戰 Boss，或繼續打小兵賺錢',
+    color: '#fbbf24',
+    life: 999,
+  };
+  emitJourney(world);
+  playTone(world, 420, 0.07, 0.025);
 }
 
 function buyEnergyDrink(world: World) {
@@ -655,6 +705,10 @@ function toggleWeapon(world: World) {
 }
 
 function encounterAIIndex(world: World) {
+  if (world.encounterIndex >= MINION_TOTAL && !world.bossQueued) {
+    if (world.playerCharacter === 'kai') return 1;
+    return world.bonusMinions % 2;
+  }
   const roster =
     world.playerCharacter === 'kai' ? KAI_ENEMY_ROSTER : FIO_ENEMY_ROSTER;
   return roster[world.encounterIndex] ?? roster[roster.length - 1];
@@ -672,14 +726,24 @@ function beginEncounter(world: World) {
   world.player.moveIntent = 0;
   world.player.state = 'IDLE';
   world.enemy.reset(930, -1);
-  world.enemy.hp = ENCOUNTER_HP[world.encounterIndex] ?? 100;
+  const boss = world.encounterIndex >= MINION_TOTAL && world.bossQueued;
+  const bonusMinion = world.encounterIndex >= MINION_TOTAL && !boss;
+  world.currentIsBoss = boss;
+  world.enemy.hp = boss
+    ? 100
+    : bonusMinion
+      ? Math.min(76, 58 + world.bonusMinions * 2)
+      : (ENCOUNTER_HP[world.encounterIndex] ?? 62);
   world.journeyPhase = 'COMBAT';
   world.encounterResolved = false;
   world.aiDecisionTimer = 0.65;
   world.aiRetreatTimer = 0;
-  const boss = world.encounterIndex === world.encounterTotal - 1;
   world.banner = {
-    text: boss ? 'FINAL BOSS' : `ENEMY ${world.encounterIndex + 1}`,
+    text: boss
+      ? 'FINAL BOSS'
+      : bonusMinion
+        ? `BONUS ENEMY ${world.bonusMinions + 1}`
+        : `ENEMY ${world.encounterIndex + 1}`,
     subtext: boss
       ? `${nextAI.name} // 決戰`
       : `${nextAI.name} // HP ${world.enemy.hp}`,
@@ -702,6 +766,9 @@ function resetWorld(world: World) {
   world.cash = 0;
   world.energyDrinks = 0;
   world.minionsDefeated = 0;
+  world.bonusMinions = 0;
+  world.bossQueued = false;
+  world.currentIsBoss = false;
   world.gunMode = false;
   world.onGunMode(false);
   world.player.displayName = PLAYER_NAMES[world.playerCharacter];
@@ -743,6 +810,9 @@ function selectPlayerCharacter(world: World, character: PlayerCharacter) {
   world.cash = 0;
   world.energyDrinks = 0;
   world.minionsDefeated = 0;
+  world.bonusMinions = 0;
+  world.bossQueued = false;
+  world.currentIsBoss = false;
   world.matchOver = false;
   world.gunMode = false;
   world.onGunMode(false);
@@ -819,7 +889,7 @@ function resolveGrapple(world: World) {
 }
 
 function tryGrapple(world: World) {
-  if (world.encounterIndex < world.encounterTotal - 1) return false;
+  if (!world.currentIsBoss) return false;
   const playerAttack = world.player.attack;
   const enemyAttack = world.enemy.attack;
   if (!playerAttack || !enemyAttack) return false;
@@ -1215,10 +1285,11 @@ function checkKO(world: World) {
     return;
   }
 
-  const bossDefeated = world.encounterIndex >= world.encounterTotal - 1;
+  const bossDefeated = world.currentIsBoss;
   if (!bossDefeated) {
     world.cash += MINION_REWARD;
     world.minionsDefeated += 1;
+    if (world.encounterIndex >= MINION_TOTAL) world.bonusMinions += 1;
   }
   world.matchOver = bossDefeated;
   world.journeyPhase = bossDefeated ? 'COMPLETE' : 'CLEAR';
@@ -1271,17 +1342,21 @@ function updateWorld(world: World, dt: number) {
     world.player.moveIntent = 0;
     world.player.update(dt);
     if (world.phaseTimer <= 0) {
-      world.encounterIndex += 1;
+      if (world.encounterIndex < MINION_TOTAL) world.encounterIndex += 1;
       world.player.stamina = 100;
       world.enemy.hp = 0;
-      const reachedCheckpoint = world.minionsDefeated % 5 === 0;
+      world.currentIsBoss = false;
+      const atBossGate = world.encounterIndex >= MINION_TOTAL;
+      const reachedCheckpoint = atBossGate || world.minionsDefeated % 5 === 0;
       world.journeyPhase = reachedCheckpoint ? 'CHECKPOINT' : 'TRAVEL';
       world.phaseTimer = reachedCheckpoint ? 0 : 1.65;
       world.encounterResolved = reachedCheckpoint;
       world.banner = reachedCheckpoint
         ? {
-            text: 'CHECKPOINT',
-            subtext: '進入商店，或直接繼續前進',
+            text: atBossGate ? 'BOSS GATE' : 'CHECKPOINT',
+            subtext: atBossGate
+              ? '挑戰 Boss，或繼續打小兵賺錢'
+              : '進入商店，或直接繼續前進',
             color: '#fbbf24',
             life: 999,
           }
@@ -1575,10 +1650,12 @@ function drawWalkFrame(
   sheet: HTMLImageElement,
   frame: number,
   height: number,
+  sourceTopRatio = 0,
+  sourceBottomRatio = 1,
 ) {
   const sourceWidth = sheet.width / 4;
-  const sourceY = sheet.height * 0.1;
-  const sourceHeight = sheet.height * 0.76;
+  const sourceY = sheet.height * sourceTopRatio;
+  const sourceHeight = sheet.height * (sourceBottomRatio - sourceTopRatio);
   const width = height * (sourceWidth / sourceHeight);
   ctx.drawImage(
     sheet,
@@ -1612,7 +1689,6 @@ function drawFighter(
   const isCrouchPose =
     fighter.crouching && !isHitPose && !isGuardPose && !attack;
   const isWalking =
-    fighter.id === 'player' &&
     !attack &&
     !isHitPose &&
     !isGuardPose &&
@@ -1730,12 +1806,21 @@ function drawFighter(
         PLAYER_GUARD_GROUND_OFFSETS[3],
       );
   } else if (isWalking) {
-    const walkFrame = Math.floor(world.animationTime * 7.5) % 4;
+    const walkFrame = Math.floor(world.animationTime * 6) % 4;
+    const walkSheet = isEnemy
+      ? world.enemyWalkSheets[world.aiIndex]
+      : world.walkSheets[world.playerCharacter];
+    const walkSize = isEnemy
+      ? (ENEMY_WALK_SIZES[world.aiIndex] ?? ENEMY_WALK_SIZES[0])
+      : PLAYER_WALK_SIZE;
+    const fioCrop = !isEnemy && world.playerCharacter === 'fio';
     drawWalkFrame(
       ctx,
-      world.walkSheets[world.playerCharacter],
+      walkSheet,
       walkFrame,
-      PLAYER_WALK_SIZE,
+      walkSize,
+      fioCrop ? 0.09 : 0,
+      fioCrop ? 0.9 : 1,
     );
   } else if (useGunPose)
     drawGunFrame(
@@ -2027,6 +2112,8 @@ export function KarateGame() {
     cash: 0,
     energyDrinks: 0,
     minionsDefeated: 0,
+    bonusMinions: 0,
+    bossGate: false,
     phase: 'TRAVEL',
     complete: false,
   });
@@ -2102,6 +2189,8 @@ export function KarateGame() {
         kaiGunSheet,
         fioWalkSheet,
         kaiWalkSheet,
+        longKickWalkSheet,
+        grapplerWalkSheet,
       ] = await Promise.all([
         fetch('/game-data/attacks.json'),
         fetch('/game-data/ai.json'),
@@ -2114,8 +2203,10 @@ export function KarateGame() {
         loadImage('/fio-guards-v2.png'),
         loadImage('/fio-gun-actions-v6.png'),
         loadImage('/kai-gun-actions-v2.png'),
-        loadImage('/fio-walk-v1.png'),
-        loadImage('/kai-walk-v1.png'),
+        loadImage('/fio-walk-v3.png'),
+        loadImage('/kai-walk-v2.png'),
+        loadImage('/enemy-long-kick-walk-v1.png'),
+        loadImage('/enemy-grappler-walk-v1.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
       const aiPayload = (await aiResponse.json()) as AIData[] | AIData;
@@ -2144,6 +2235,7 @@ export function KarateGame() {
         actionSheet,
         playerReactionSheet,
         enemySheets: [quickFistSheet, longKickSheet, grapplerSheet],
+        enemyWalkSheets: [kaiWalkSheet, longKickWalkSheet, grapplerWalkSheet],
         playerGuardSheet,
         maleActionSheet: quickFistSheet,
         gunSheets: { fio: fioGunSheet, kai: kaiGunSheet },
@@ -2170,6 +2262,9 @@ export function KarateGame() {
         cash: 0,
         energyDrinks: 0,
         minionsDefeated: 0,
+        bonusMinions: 0,
+        bossQueued: false,
+        currentIsBoss: false,
         encounterResolved: false,
         matchOver: false,
         hitStop: 0,
@@ -2196,6 +2291,8 @@ export function KarateGame() {
         cash: 0,
         energyDrinks: 0,
         minionsDefeated: 0,
+        bonusMinions: 0,
+        bossGate: false,
         phase: 'TRAVEL',
         complete: false,
       });
@@ -2344,6 +2441,20 @@ export function KarateGame() {
     const world = worldRef.current;
     if (!world) return;
     continueJourney(world);
+    canvasRef.current?.focus();
+  }, []);
+
+  const farmMinionControl = useCallback(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    farmMinion(world);
+    canvasRef.current?.focus();
+  }, []);
+
+  const leaveShopControl = useCallback(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    leaveShop(world);
     canvasRef.current?.focus();
   }, []);
 
@@ -2537,7 +2648,7 @@ export function KarateGame() {
           <span className="rival-index text-rose-300">ROUTE // 11 戰</span>
           <strong>一路前進，最後打 Boss</strong>
           <small>
-            十名小兵逐步增強；每打倒一人獲得 $10，最後一戰挑戰 Boss。
+            十名小兵逐步增強；Boss 前可繼續打小兵賺錢，準備好再挑戰。
           </small>
           <span className="rival-tendency">
             每 5 人可進商店 · 飲料與子彈包各 $20
@@ -2583,13 +2694,22 @@ export function KarateGame() {
             <div className="checkpoint-card">
               <span>CHECKPOINT // 已擊倒 {journeyView.minionsDefeated} 人</span>
               <h2>現金 ${journeyView.cash}</h2>
-              <p>要進商店補充物資，還是直接迎戰下一位敵人？</p>
+              <p>
+                {journeyView.bossGate
+                  ? `Boss 已在前方；也可以再打小兵賺錢。額外擊倒 ${journeyView.bonusMinions} 人。`
+                  : '要進商店補充物資，還是直接迎戰下一位敵人？'}
+              </p>
               <div>
                 <button type="button" onClick={enterShopControl}>
                   <ShoppingCart /> 進入商店
                 </button>
+                {journeyView.bossGate && (
+                  <button type="button" onClick={farmMinionControl}>
+                    再打小兵 +${MINION_REWARD}
+                  </button>
+                )}
                 <button type="button" onClick={continueJourneyControl}>
-                  繼續前進
+                  {journeyView.bossGate ? '挑戰最終 Boss' : '繼續前進'}
                 </button>
               </div>
             </div>
@@ -2630,9 +2750,11 @@ export function KarateGame() {
               <button
                 type="button"
                 className="leave-shop-button"
-                onClick={continueJourneyControl}
+                onClick={leaveShopControl}
               >
-                離開商店，繼續前進
+                {journeyView.bossGate
+                  ? '回到 Boss 前的選擇'
+                  : '離開商店，繼續前進'}
               </button>
             </div>
           </div>

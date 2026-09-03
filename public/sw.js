@@ -1,4 +1,4 @@
-const CACHE_NAME = 'neon-karate-v5';
+const CACHE_NAME = 'neon-karate-v6';
 const APP_SHELL = [
   '/',
   '/manifest.webmanifest',
@@ -15,8 +15,10 @@ const APP_SHELL = [
   '/fio-guards-v2.png',
   '/fio-gun-actions-v6.png',
   '/kai-gun-actions-v2.png',
-  '/fio-walk-v1.png',
-  '/kai-walk-v1.png',
+  '/fio-walk-v3.png',
+  '/kai-walk-v2.png',
+  '/enemy-long-kick-walk-v1.png',
+  '/enemy-grappler-walk-v1.png',
   '/enemy-quick-fist-v3.png',
   '/enemy-long-kick-v3.png',
   '/enemy-grappler-v3.png',
