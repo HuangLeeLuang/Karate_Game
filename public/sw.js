@@ -1,4 +1,4 @@
-const CACHE_NAME = 'neon-karate-v7';
+const CACHE_NAME = 'neon-karate-v8';
 const APP_SHELL = [
   '/',
   '/manifest.webmanifest',
@@ -9,19 +9,19 @@ const APP_SHELL = [
   '/apple-touch-icon.png',
   '/game-data/attacks.json',
   '/game-data/ai.json',
-  '/urban-stage.png',
-  '/fio-actions-v3.png',
-  '/fio-hit-reactions-v3.png',
-  '/fio-guards-v2.png',
-  '/fio-gun-actions-v6.png',
-  '/kai-gun-actions-v2.png',
-  '/fio-walk-v3.png',
-  '/kai-walk-v2.png',
-  '/enemy-long-kick-walk-v1.png',
-  '/enemy-grappler-walk-v1.png',
-  '/enemy-quick-fist-v3.png',
-  '/enemy-long-kick-v3.png',
-  '/enemy-grappler-v3.png',
+  '/urban-stage-seamless.png',
+  '/fio-actions-smooth.png',
+  '/fio-hit-reactions-smooth.png',
+  '/fio-guards-smooth.png',
+  '/fio-gun-actions-smooth.png',
+  '/kai-gun-actions-smooth.png',
+  '/fio-walk-smooth.png',
+  '/kai-walk-smooth.png',
+  '/enemy-long-kick-walk-smooth.png',
+  '/enemy-grappler-walk-smooth.png',
+  '/enemy-quick-fist-smooth.png',
+  '/enemy-long-kick-smooth.png',
+  '/enemy-grappler-smooth.png',
 ];
 
 self.addEventListener('install', (event) => {

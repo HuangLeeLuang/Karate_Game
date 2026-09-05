@@ -146,11 +146,19 @@ interface JourneyView {
   ammo: number;
   cash: number;
   energyDrinks: number;
+  maxHp: number;
+  punchPower: number;
+  kickPower: number;
   minionsDefeated: number;
   bonusMinions: number;
   bossGate: boolean;
   phase: JourneyPhase;
   complete: boolean;
+}
+
+interface GameConfig {
+  enemyCount: number;
+  enemyStrength: number;
 }
 
 interface InstallPromptEvent extends Event {
@@ -195,6 +203,10 @@ interface World {
   animationTime: number;
   ammo: number;
   maxAmmo: number;
+  config: GameConfig;
+  maxHp: number;
+  punchPower: number;
+  kickPower: number;
   cash: number;
   energyDrinks: number;
   minionsDefeated: number;
@@ -220,13 +232,13 @@ interface World {
 
 const levelIndex: Record<AttackLevel, number> = { HIGH: 0, MID: 1, LOW: 2 };
 const PLAYER_ACTION_SIZE = 382;
-const PLAYER_REACTION_SIZE = 448;
-const PLAYER_GUARD_SIZE = 420;
-const PLAYER_GUN_SIZE = 359;
+const PLAYER_REACTION_SIZE = PLAYER_ACTION_SIZE;
+const PLAYER_GUARD_SIZE = PLAYER_ACTION_SIZE;
+const PLAYER_GUN_SIZE = PLAYER_ACTION_SIZE;
 const PLAYER_GUN_GROUND_OFFSET = 3;
-const PLAYER_WALK_SIZE = 405;
-const ENEMY_WALK_SIZES = [388, 388, 398] as const;
+const PLAYER_WALK_SIZE = PLAYER_ACTION_SIZE;
 const ENEMY_ACTION_SIZES = [372, 367, 375] as const;
+const ENEMY_WALK_SIZES = ENEMY_ACTION_SIZES;
 const ENEMY_FRAME_RECTS = [
   [
     [132, 15, 192, 289],
@@ -274,16 +286,6 @@ const ENEMY_FRAME_RECTS = [
 const PLAYER_ACTION_GROUND_OFFSETS = [15, 17, 16, 18, 37, 36, 34, 32] as const;
 const PLAYER_REACTION_GROUND_OFFSETS = [35, 34, 35, 37] as const;
 const PLAYER_GUARD_GROUND_OFFSETS = [25, 31, 28, 31] as const;
-const PLAYER_FRAME_RECTS = [
-  [149, 16, 207, 412],
-  [528, 26, 278, 398],
-  [955, 37, 279, 388],
-  [1320, 149, 342, 274],
-  [91, 456, 299, 388],
-  [514, 452, 314, 393],
-  [966, 600, 335, 247],
-  [1322, 460, 346, 390],
-] as const;
 const attackInputByLevel: Record<
   'PUNCH' | 'KICK' | 'GUN',
   Record<AttackLevel, string>
@@ -292,9 +294,7 @@ const attackInputByLevel: Record<
   KICK: { HIGH: 'w', MID: 's', LOW: 'x' },
   GUN: { HIGH: 'q', MID: 'a', LOW: 'z' },
 };
-const MINION_TOTAL = 10;
-const ENCOUNTER_TOTAL = MINION_TOTAL + 1;
-const ENCOUNTER_HP = [26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 100] as const;
+const DEFAULT_CONFIG: GameConfig = { enemyCount: 10, enemyStrength: 1 };
 const FIO_ENEMY_ROSTER = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 2] as const;
 const KAI_ENEMY_ROSTER = [1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 2] as const;
 const MINION_REWARD = 10;
@@ -302,6 +302,11 @@ const ENERGY_DRINK_COST = 20;
 const ENERGY_DRINK_HEAL = 35;
 const AMMO_PACK_COST = 20;
 const AMMO_PACK_SIZE = 6;
+const MAX_HP_UPGRADE_COST = 35;
+const MAX_HP_UPGRADE_AMOUNT = 20;
+const PUNCH_UPGRADE_COST = 30;
+const KICK_UPGRADE_COST = 30;
+const POWER_UPGRADE_AMOUNT = 0.15;
 const PLAYER_NAMES: Record<PlayerCharacter, string> = {
   fio: 'FIO // 白閃',
   kai: 'KAI // 瞬拳',
@@ -326,6 +331,7 @@ class Fighter {
   x: number;
   direction: Direction;
   hp = 100;
+  maxHp = 100;
   stamina = 100;
   state = 'IDLE';
   crouching = false;
@@ -348,7 +354,7 @@ class Fighter {
   reset(x: number, direction: Direction) {
     this.x = x;
     this.direction = direction;
-    this.hp = 100;
+    this.hp = this.maxHp;
     this.stamina = 100;
     this.state = 'IDLE';
     this.crouching = false;
@@ -554,18 +560,26 @@ function emitJourney(world: World) {
     ammo: world.ammo,
     cash: world.cash,
     energyDrinks: world.energyDrinks,
+    maxHp: world.maxHp,
+    punchPower: world.punchPower,
+    kickPower: world.kickPower,
     minionsDefeated: world.minionsDefeated,
     bonusMinions: world.bonusMinions,
-    bossGate: world.encounterIndex >= MINION_TOTAL && !world.matchOver,
+    bossGate:
+      world.encounterIndex >= world.config.enemyCount && !world.matchOver,
     phase: world.journeyPhase,
     complete: world.matchOver,
   });
 }
 
 function consumeEnergyDrink(world: World) {
-  if (world.energyDrinks <= 0 || world.player.hp >= 100 || world.matchOver)
+  if (
+    world.energyDrinks <= 0 ||
+    world.player.hp >= world.maxHp ||
+    world.matchOver
+  )
     return;
-  const recovered = Math.min(ENERGY_DRINK_HEAL, 100 - world.player.hp);
+  const recovered = Math.min(ENERGY_DRINK_HEAL, world.maxHp - world.player.hp);
   world.energyDrinks -= 1;
   world.player.hp += recovered;
   world.banner = {
@@ -595,7 +609,7 @@ function enterShop(world: World) {
 function continueJourney(world: World) {
   if (world.journeyPhase !== 'CHECKPOINT' && world.journeyPhase !== 'SHOP')
     return;
-  const headingToBoss = world.encounterIndex >= MINION_TOTAL;
+  const headingToBoss = world.encounterIndex >= world.config.enemyCount;
   world.bossQueued = headingToBoss;
   world.journeyPhase = 'TRAVEL';
   world.phaseTimer = 1.65;
@@ -615,7 +629,7 @@ function continueJourney(world: World) {
 function farmMinion(world: World) {
   if (
     world.journeyPhase !== 'CHECKPOINT' ||
-    world.encounterIndex < MINION_TOTAL
+    world.encounterIndex < world.config.enemyCount
   )
     return;
   world.bossQueued = false;
@@ -634,7 +648,7 @@ function farmMinion(world: World) {
 
 function leaveShop(world: World) {
   if (world.journeyPhase !== 'SHOP') return;
-  if (world.encounterIndex < MINION_TOTAL) {
+  if (world.encounterIndex < world.config.enemyCount) {
     continueJourney(world);
     return;
   }
@@ -677,6 +691,42 @@ function buyAmmoPack(world: World) {
   playTone(world, 820, 0.08, 0.03);
 }
 
+function buyMaxHpUpgrade(world: World) {
+  if (world.journeyPhase !== 'SHOP' || world.cash < MAX_HP_UPGRADE_COST) return;
+  world.cash -= MAX_HP_UPGRADE_COST;
+  world.maxHp += MAX_HP_UPGRADE_AMOUNT;
+  world.player.maxHp = world.maxHp;
+  world.player.hp = Math.min(
+    world.maxHp,
+    world.player.hp + MAX_HP_UPGRADE_AMOUNT,
+  );
+  world.banner = {
+    text: `MAX HP +${MAX_HP_UPGRADE_AMOUNT}`,
+    subtext: `上限 ${world.maxHp} // 現金 $${world.cash}`,
+    color: '#4ade80',
+    life: 0.95,
+  };
+  emitJourney(world);
+  playTone(world, 680, 0.1, 0.035);
+}
+
+function buyPowerUpgrade(world: World, type: 'PUNCH' | 'KICK') {
+  const cost = type === 'PUNCH' ? PUNCH_UPGRADE_COST : KICK_UPGRADE_COST;
+  if (world.journeyPhase !== 'SHOP' || world.cash < cost) return;
+  world.cash -= cost;
+  if (type === 'PUNCH') world.punchPower += POWER_UPGRADE_AMOUNT;
+  else world.kickPower += POWER_UPGRADE_AMOUNT;
+  const power = type === 'PUNCH' ? world.punchPower : world.kickPower;
+  world.banner = {
+    text: `${type} POWER +${Math.round(POWER_UPGRADE_AMOUNT * 100)}%`,
+    subtext: `目前 ${Math.round(power * 100)}% // 現金 $${world.cash}`,
+    color: type === 'PUNCH' ? '#fbbf24' : '#fb7185',
+    life: 0.95,
+  };
+  emitJourney(world);
+  playTone(world, type === 'PUNCH' ? 560 : 460, 0.1, 0.035);
+}
+
 function setGunMode(world: World, enabled: boolean) {
   if (enabled && world.ammo <= 0) {
     world.gunMode = false;
@@ -705,13 +755,18 @@ function toggleWeapon(world: World) {
 }
 
 function encounterAIIndex(world: World) {
-  if (world.encounterIndex >= MINION_TOTAL && !world.bossQueued) {
+  if (world.encounterIndex >= world.config.enemyCount && !world.bossQueued) {
     if (world.playerCharacter === 'kai') return 1;
     return world.bonusMinions % 2;
   }
   const roster =
     world.playerCharacter === 'kai' ? KAI_ENEMY_ROSTER : FIO_ENEMY_ROSTER;
-  return roster[world.encounterIndex] ?? roster[roster.length - 1];
+  const progress = world.encounterIndex / Math.max(1, world.config.enemyCount);
+  const rosterIndex = Math.min(
+    roster.length - 2,
+    Math.floor(progress * (roster.length - 1)),
+  );
+  return roster[rosterIndex] ?? roster[0];
 }
 
 function beginEncounter(world: World) {
@@ -726,14 +781,22 @@ function beginEncounter(world: World) {
   world.player.moveIntent = 0;
   world.player.state = 'IDLE';
   world.enemy.reset(930, -1);
-  const boss = world.encounterIndex >= MINION_TOTAL && world.bossQueued;
-  const bonusMinion = world.encounterIndex >= MINION_TOTAL && !boss;
+  const boss =
+    world.encounterIndex >= world.config.enemyCount && world.bossQueued;
+  const bonusMinion = world.encounterIndex >= world.config.enemyCount && !boss;
   world.currentIsBoss = boss;
-  world.enemy.hp = boss
+  const routeProgress =
+    world.encounterIndex / Math.max(1, world.config.enemyCount - 1);
+  const baseHp = boss
     ? 100
     : bonusMinion
-      ? Math.min(76, 58 + world.bonusMinions * 2)
-      : (ENCOUNTER_HP[world.encounterIndex] ?? 62);
+      ? Math.min(86, 62 + world.bonusMinions * 3)
+      : Math.round(26 + Math.min(1, routeProgress) * 36);
+  world.enemy.maxHp = Math.max(
+    12,
+    Math.round(baseHp * world.config.enemyStrength),
+  );
+  world.enemy.hp = world.enemy.maxHp;
   world.journeyPhase = 'COMBAT';
   world.encounterResolved = false;
   world.aiDecisionTimer = 0.65;
@@ -755,6 +818,7 @@ function beginEncounter(world: World) {
 }
 
 function resetWorld(world: World) {
+  world.encounterTotal = world.config.enemyCount + 1;
   world.encounterIndex = 0;
   world.encounterResolved = false;
   world.matchOver = false;
@@ -765,6 +829,9 @@ function resetWorld(world: World) {
   world.ammo = world.maxAmmo;
   world.cash = 0;
   world.energyDrinks = 0;
+  world.maxHp = 100;
+  world.punchPower = 1;
+  world.kickPower = 1;
   world.minionsDefeated = 0;
   world.bonusMinions = 0;
   world.bossQueued = false;
@@ -772,6 +839,7 @@ function resetWorld(world: World) {
   world.gunMode = false;
   world.onGunMode(false);
   world.player.displayName = PLAYER_NAMES[world.playerCharacter];
+  world.player.maxHp = world.maxHp;
   world.player.reset(350, 1);
   world.enemy.reset(930, -1);
   world.enemy.hp = 0;
@@ -799,6 +867,7 @@ function selectPlayerCharacter(world: World, character: PlayerCharacter) {
   if (world.status === 'FIGHTING' || world.status === 'PAUSED') return;
   world.playerCharacter = character;
   world.player.displayName = PLAYER_NAMES[character];
+  world.player.maxHp = 100;
   world.player.reset(350, 1);
   world.enemy.reset(930, -1);
   world.enemy.hp = 0;
@@ -809,6 +878,9 @@ function selectPlayerCharacter(world: World, character: PlayerCharacter) {
   world.ammo = world.maxAmmo;
   world.cash = 0;
   world.energyDrinks = 0;
+  world.maxHp = 100;
+  world.punchPower = 1;
+  world.kickPower = 1;
   world.minionsDefeated = 0;
   world.bonusMinions = 0;
   world.bossQueued = false;
@@ -820,6 +892,14 @@ function selectPlayerCharacter(world: World, character: PlayerCharacter) {
   emitJourney(world);
   setStatus(world, 'READY');
   playTone(world, character === 'fio' ? 410 : 310, 0.08, 0.025);
+}
+
+function configureWorld(world: World, config: GameConfig) {
+  world.config = {
+    enemyCount: Math.round(clamp(config.enemyCount, 1, 30)),
+    enemyStrength: clamp(config.enemyStrength, 0.5, 2.5),
+  };
+  world.encounterTotal = world.config.enemyCount + 1;
 }
 
 function beginGrapple(world: World) {
@@ -854,7 +934,9 @@ function resolveGrapple(world: World) {
     playerTiming +
     directionRead +
     Math.random() * 1.5;
-  const enemyPower = world.enemy.stamina * 0.035 + 15 + Math.random() * 1.5;
+  const enemyPower =
+    (world.enemy.stamina * 0.035 + 15 + Math.random() * 1.5) *
+    world.config.enemyStrength;
   const playerWins = playerPower >= enemyPower;
   const winner = playerWins ? world.player : world.enemy;
   const loser = playerWins ? world.enemy : world.player;
@@ -862,7 +944,10 @@ function resolveGrapple(world: World) {
     ? (grapple.playerChoice ?? winner.direction)
     : grapple.aiChoice;
 
-  loser.hp = Math.max(0, loser.hp - 20);
+  const throwDamage = playerWins
+    ? 20
+    : Math.round(20 * world.config.enemyStrength);
+  loser.hp = Math.max(0, loser.hp - throwDamage);
   loser.state = 'KNOCKDOWN';
   loser.stunFrames = 54;
   loser.attack = null;
@@ -932,7 +1017,19 @@ function resolveAttack(world: World, attacker: Fighter, defender: Fighter) {
   runtime.hitResolved = true;
   const counter = defender.phase === 'RECOVERY';
   const guarded = defender.canAutoGuard(runtime.data.attackLevel);
-  defender.receiveHit(runtime.data, attacker.direction, counter, guarded);
+  const powerMultiplier =
+    attacker.id === 'enemy'
+      ? world.config.enemyStrength
+      : runtime.data.attackType === 'PUNCH'
+        ? world.punchPower
+        : runtime.data.attackType === 'KICK'
+          ? world.kickPower
+          : 1;
+  const effectiveAttack = {
+    ...runtime.data,
+    damage: Math.max(1, Math.round(runtime.data.damage * powerMultiplier)),
+  };
+  defender.receiveHit(effectiveAttack, attacker.direction, counter, guarded);
 
   const impactY = targetBox.y + targetBox.h / 2;
   world.impacts.push({
@@ -1086,6 +1183,7 @@ function updateAI(world: World, dt: number) {
   world.aiDecisionTimer =
     (world.ai.reactionFrames / FPS) *
     (1.35 - progress * 0.5) *
+    (1.25 - Math.min(2.5, world.config.enemyStrength) * 0.2) *
     (0.85 + Math.random() * 0.55);
   const playerAttack = player.attack?.data;
   if (
@@ -1289,7 +1387,8 @@ function checkKO(world: World) {
   if (!bossDefeated) {
     world.cash += MINION_REWARD;
     world.minionsDefeated += 1;
-    if (world.encounterIndex >= MINION_TOTAL) world.bonusMinions += 1;
+    if (world.encounterIndex >= world.config.enemyCount)
+      world.bonusMinions += 1;
   }
   world.matchOver = bossDefeated;
   world.journeyPhase = bossDefeated ? 'COMPLETE' : 'CLEAR';
@@ -1342,11 +1441,12 @@ function updateWorld(world: World, dt: number) {
     world.player.moveIntent = 0;
     world.player.update(dt);
     if (world.phaseTimer <= 0) {
-      if (world.encounterIndex < MINION_TOTAL) world.encounterIndex += 1;
+      if (world.encounterIndex < world.config.enemyCount)
+        world.encounterIndex += 1;
       world.player.stamina = 100;
       world.enemy.hp = 0;
       world.currentIsBoss = false;
-      const atBossGate = world.encounterIndex >= MINION_TOTAL;
+      const atBossGate = world.encounterIndex >= world.config.enemyCount;
       const reachedCheckpoint = atBossGate || world.minionsDefeated % 5 === 0;
       world.journeyPhase = reachedCheckpoint ? 'CHECKPOINT' : 'TRAVEL';
       world.phaseTimer = reachedCheckpoint ? 0 : 1.65;
@@ -1452,11 +1552,15 @@ function drawBar(
   value: number,
   color: string,
   alignRight = false,
+  maximum = 100,
 ) {
   roundedRect(ctx, x, y, width, 18, 9);
   ctx.fillStyle = 'rgba(2, 8, 18, .78)';
   ctx.fill();
-  const fillWidth = Math.max(0, (width - 4) * (value / 100));
+  const fillWidth = Math.max(
+    0,
+    Math.min(width - 4, (width - 4) * (value / Math.max(1, maximum))),
+  );
   roundedRect(
     ctx,
     alignRight ? x + width - 2 - fillWidth : x + 2,
@@ -1514,10 +1618,10 @@ function drawActionFrame(
   rows = 2,
   groundOffset = 0,
 ) {
-  const sourceWidth = sheet.width / 4;
+  const sourceWidth = sheet.width / 12;
   const sourceHeight = sheet.height / rows;
-  const column = frame % 4;
-  const row = Math.floor(frame / 4);
+  const column = frame % 12;
+  const row = Math.floor(frame / 12);
   const drawWidth = size * (sourceWidth / sourceHeight);
   ctx.drawImage(
     sheet,
@@ -1532,46 +1636,6 @@ function drawActionFrame(
   );
 }
 
-function drawPlayerActionFrame(
-  ctx: CanvasRenderingContext2D,
-  sheet: HTMLImageElement,
-  frame: number,
-  size: number,
-  rect: readonly [number, number, number, number],
-  groundOffset = 0,
-) {
-  const [rawX, rawY, rawWidth, rawHeight] = rect;
-  const padding = 2;
-  const sourceX = Math.max(0, rawX - padding);
-  const sourceY = Math.max(0, rawY - padding);
-  const sourceRight = Math.min(sheet.width, rawX + rawWidth + padding);
-  const sourceBottom = Math.min(sheet.height, rawY + rawHeight + padding);
-  const sourceWidth = sourceRight - sourceX;
-  const sourceHeight = sourceBottom - sourceY;
-  const nominalCellWidth = sheet.width / 4;
-  const nominalCellHeight = sheet.height / 2;
-  const scale = size / nominalCellHeight;
-  const column = frame % 4;
-  const row = Math.floor(frame / 4);
-  const drawX =
-    (-nominalCellWidth * scale) / 2 +
-    (sourceX - column * nominalCellWidth) * scale;
-  const drawY =
-    -size + (sourceY - row * nominalCellHeight) * scale + groundOffset;
-
-  ctx.drawImage(
-    sheet,
-    sourceX,
-    sourceY,
-    sourceWidth,
-    sourceHeight,
-    drawX,
-    drawY,
-    sourceWidth * scale,
-    sourceHeight * scale,
-  );
-}
-
 function drawEnemyActionFrame(
   ctx: CanvasRenderingContext2D,
   sheet: HTMLImageElement,
@@ -1580,34 +1644,25 @@ function drawEnemyActionFrame(
   rect: readonly [number, number, number, number],
   xOffset = 0,
 ) {
-  const [rawX, rawY, rawWidth, rawHeight] = rect;
-  const padding = 2;
-  const sourceX = Math.max(0, rawX - padding);
-  const sourceY = Math.max(0, rawY - padding);
-  const sourceRight = Math.min(sheet.width, rawX + rawWidth + padding);
-  const sourceBottom = Math.min(sheet.height, rawY + rawHeight + padding);
-  const sourceWidth = sourceRight - sourceX;
-  const sourceHeight = sourceBottom - sourceY;
-  const nominalCellWidth = sheet.width / 4;
+  void rect;
+  const sourceWidth = sheet.width / 12;
+  const sourceHeight = sheet.height / 3;
+  const column = frame % 12;
+  const row = Math.floor(frame / 12);
   const nominalCellHeight = sheet.height / 3;
   const scale = size / nominalCellHeight;
-  const column = frame % 4;
-  const drawX =
-    (-nominalCellWidth * scale) / 2 +
-    (sourceX - column * nominalCellWidth) * scale +
-    xOffset;
-  const drawY = -(rawY + rawHeight - sourceY) * scale;
+  const drawWidth = sourceWidth * scale;
 
   ctx.drawImage(
     sheet,
-    sourceX,
-    sourceY,
+    column * sourceWidth,
+    row * sourceHeight,
     sourceWidth,
     sourceHeight,
-    drawX,
-    drawY,
-    sourceWidth * scale,
-    sourceHeight * scale,
+    -drawWidth / 2 + xOffset,
+    -size,
+    drawWidth,
+    size,
   );
 }
 
@@ -1630,7 +1685,7 @@ function drawGunFrame(
   frame: number,
   height: number,
 ) {
-  const sourceWidth = sheet.width / 4;
+  const sourceWidth = sheet.width / 12;
   const width = height * (sourceWidth / sheet.height);
   ctx.drawImage(
     sheet,
@@ -1653,7 +1708,7 @@ function drawWalkFrame(
   sourceTopRatio = 0,
   sourceBottomRatio = 1,
 ) {
-  const sourceWidth = sheet.width / 4;
+  const sourceWidth = sheet.width / 12;
   const sourceY = sheet.height * sourceTopRatio;
   const sourceHeight = sheet.height * (sourceBottomRatio - sourceTopRatio);
   const width = height * (sourceWidth / sourceHeight);
@@ -1713,6 +1768,8 @@ function drawFighter(
     ? clamp(fighter.attack.frame / attackTotal, 0, 1)
     : 0;
   const actionPulse = attack ? Math.sin(Math.PI * attackProgress) : 0;
+  const posePhase = Math.min(2, Math.floor(actionPulse * 3));
+  const expandedFrame = frame * 3 + posePhase;
   const activeThrust =
     attack && attack.attackType !== 'GUN'
       ? actionPulse * (attack.attackType === 'KICK' ? 42 : 28)
@@ -1746,19 +1803,19 @@ function drawFighter(
   ctx.scale(fighter.direction, 1);
   if (isHitPose && reactionFrame !== null) {
     if (isEnemy || isKai) {
-      const enemyReactionFrame = reactionFrame + 8;
+      const enemyReactionFrame = (reactionFrame + 8) * 3 + 2;
       drawEnemyActionFrame(
         ctx,
         combatSheet,
         enemyReactionFrame,
         enemyActionSize,
-        enemyFrameRects[enemyReactionFrame],
+        enemyFrameRects[reactionFrame + 8],
       );
     } else {
       drawActionFrame(
         ctx,
         world.playerReactionSheet,
-        reactionFrame,
+        reactionFrame * 3 + 2,
         PLAYER_REACTION_SIZE,
         0,
         1,
@@ -1767,19 +1824,19 @@ function drawFighter(
     }
   } else if (isGuardPose && guardFrame !== null) {
     if (isEnemy || isKai) {
-      const enemyGuardFrame = guardFrame + 7;
+      const enemyGuardFrame = (guardFrame + 7) * 3 + 2;
       drawEnemyActionFrame(
         ctx,
         combatSheet,
         enemyGuardFrame,
         enemyActionSize,
-        enemyFrameRects[enemyGuardFrame],
+        enemyFrameRects[guardFrame + 7],
       );
     } else {
       drawActionFrame(
         ctx,
         world.playerGuardSheet,
-        guardFrame,
+        guardFrame * 3 + 2,
         PLAYER_GUARD_SIZE,
         0,
         1,
@@ -1791,7 +1848,7 @@ function drawFighter(
       drawEnemyActionFrame(
         ctx,
         combatSheet,
-        10,
+        10 * 3 + 2,
         enemyActionSize,
         enemyFrameRects[10],
       );
@@ -1799,51 +1856,44 @@ function drawFighter(
       drawActionFrame(
         ctx,
         world.playerGuardSheet,
-        3,
+        3 * 3 + 2,
         PLAYER_GUARD_SIZE,
         0,
         1,
         PLAYER_GUARD_GROUND_OFFSETS[3],
       );
   } else if (isWalking) {
-    const walkFrame = Math.floor(world.animationTime * 6) % 4;
+    const walkFrame = Math.floor(world.animationTime * 18) % 12;
     const walkSheet = isEnemy
       ? world.enemyWalkSheets[world.aiIndex]
       : world.walkSheets[world.playerCharacter];
     const walkSize = isEnemy
       ? (ENEMY_WALK_SIZES[world.aiIndex] ?? ENEMY_WALK_SIZES[0])
       : PLAYER_WALK_SIZE;
-    const fioCrop = !isEnemy && world.playerCharacter === 'fio';
-    drawWalkFrame(
-      ctx,
-      walkSheet,
-      walkFrame,
-      walkSize,
-      fioCrop ? 0.09 : 0,
-      fioCrop ? 0.9 : 1,
-    );
+    drawWalkFrame(ctx, walkSheet, walkFrame, walkSize, 0, 1);
   } else if (useGunPose)
     drawGunFrame(
       ctx,
       world.gunSheets[world.playerCharacter],
-      gunFrame,
+      gunFrame * 3 + posePhase,
       PLAYER_GUN_SIZE,
     );
   else if (isEnemy || isKai)
     drawEnemyActionFrame(
       ctx,
       combatSheet,
-      frame,
+      expandedFrame,
       enemyActionSize,
       enemyFrameRects[frame],
     );
   else
-    drawPlayerActionFrame(
+    drawActionFrame(
       ctx,
       combatSheet,
-      frame,
+      expandedFrame,
       actionSize,
-      PLAYER_FRAME_RECTS[frame] ?? PLAYER_FRAME_RECTS[0],
+      0,
+      2,
       actionGroundOffset,
     );
   ctx.restore();
@@ -1934,7 +1984,7 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
     38,
   );
   ctx.textAlign = 'left';
-  drawBar(ctx, 54, 52, 430, world.player.hp, '#22d3ee');
+  drawBar(ctx, 54, 52, 430, world.player.hp, '#22d3ee', false, world.maxHp);
   drawBar(
     ctx,
     WIDTH - 484,
@@ -1943,6 +1993,7 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
     world.journeyPhase === 'TRAVEL' ? 0 : world.enemy.hp,
     '#fb7185',
     true,
+    world.enemy.maxHp,
   );
   drawBar(ctx, 54, 79, 282, world.player.stamina, '#fbbf24');
   drawBar(ctx, WIDTH - 336, 79, 282, world.enemy.stamina, '#fbbf24', true);
@@ -2024,7 +2075,11 @@ function drawWorld(ctx: CanvasRenderingContext2D, world: World) {
     if (world.status === 'READY') {
       ctx.font = '700 14px ui-monospace, monospace';
       ctx.fillStyle = '#f8fafc';
-      ctx.fillText('10 MINIONS // 2 SHOPS // FINAL BOSS', WIDTH / 2, 365);
+      ctx.fillText(
+        `${world.config.enemyCount} ENEMIES // ${Math.ceil(world.config.enemyCount / 5)} SHOPS // FINAL BOSS`,
+        WIDTH / 2,
+        365,
+      );
       ctx.fillStyle = 'rgba(226, 232, 240, .7)';
       ctx.fillText(
         'E 切換拳槍 · V 使用飲料 · 子彈用完自動出拳',
@@ -2105,12 +2160,16 @@ export function KarateGame() {
   );
   const [isInstalled, setIsInstalled] = useState(false);
   const [showInstallHelp, setShowInstallHelp] = useState(false);
+  const [gameConfig, setGameConfig] = useState<GameConfig>(DEFAULT_CONFIG);
   const [journeyView, setJourneyView] = useState<JourneyView>({
     encounter: 1,
-    total: ENCOUNTER_TOTAL,
+    total: DEFAULT_CONFIG.enemyCount + 1,
     ammo: 6,
     cash: 0,
     energyDrinks: 0,
+    maxHp: 100,
+    punchPower: 1,
+    kickPower: 1,
     minionsDefeated: 0,
     bonusMinions: 0,
     bossGate: false,
@@ -2194,19 +2253,19 @@ export function KarateGame() {
       ] = await Promise.all([
         fetch('/game-data/attacks.json'),
         fetch('/game-data/ai.json'),
-        loadImage('/urban-stage.png'),
-        loadImage('/fio-actions-v3.png'),
-        loadImage('/fio-hit-reactions-v3.png'),
-        loadImage('/enemy-quick-fist-v3.png'),
-        loadImage('/enemy-long-kick-v3.png'),
-        loadImage('/enemy-grappler-v3.png'),
-        loadImage('/fio-guards-v2.png'),
-        loadImage('/fio-gun-actions-v6.png'),
-        loadImage('/kai-gun-actions-v2.png'),
-        loadImage('/fio-walk-v3.png'),
-        loadImage('/kai-walk-v2.png'),
-        loadImage('/enemy-long-kick-walk-v1.png'),
-        loadImage('/enemy-grappler-walk-v1.png'),
+        loadImage('/urban-stage-seamless.png'),
+        loadImage('/fio-actions-smooth.png'),
+        loadImage('/fio-hit-reactions-smooth.png'),
+        loadImage('/enemy-quick-fist-smooth.png'),
+        loadImage('/enemy-long-kick-smooth.png'),
+        loadImage('/enemy-grappler-smooth.png'),
+        loadImage('/fio-guards-smooth.png'),
+        loadImage('/fio-gun-actions-smooth.png'),
+        loadImage('/kai-gun-actions-smooth.png'),
+        loadImage('/fio-walk-smooth.png'),
+        loadImage('/kai-walk-smooth.png'),
+        loadImage('/enemy-long-kick-walk-smooth.png'),
+        loadImage('/enemy-grappler-walk-smooth.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
       const aiPayload = (await aiResponse.json()) as AIData[] | AIData;
@@ -2252,13 +2311,17 @@ export function KarateGame() {
         aiRetreatTimer: 0,
         playerCharacter: 'fio',
         encounterIndex: 0,
-        encounterTotal: ENCOUNTER_TOTAL,
+        encounterTotal: DEFAULT_CONFIG.enemyCount + 1,
         journeyPhase: 'TRAVEL',
         phaseTimer: 0,
         stageScroll: 0,
         animationTime: 0,
         ammo: 6,
         maxAmmo: 6,
+        config: DEFAULT_CONFIG,
+        maxHp: 100,
+        punchPower: 1,
+        kickPower: 1,
         cash: 0,
         energyDrinks: 0,
         minionsDefeated: 0,
@@ -2286,10 +2349,13 @@ export function KarateGame() {
       setActiveOpponentIndex(0);
       setJourneyView({
         encounter: 1,
-        total: ENCOUNTER_TOTAL,
+        total: DEFAULT_CONFIG.enemyCount + 1,
         ammo: 6,
         cash: 0,
         energyDrinks: 0,
+        maxHp: 100,
+        punchPower: 1,
+        kickPower: 1,
         minionsDefeated: 0,
         bonusMinions: 0,
         bossGate: false,
@@ -2391,9 +2457,10 @@ export function KarateGame() {
     const world = worldRef.current;
     if (!world) return;
     ensureAudio();
+    configureWorld(world, gameConfig);
     resetWorld(world);
     canvasRef.current?.focus();
-  }, [ensureAudio]);
+  }, [ensureAudio, gameConfig]);
 
   const chooseCharacter = useCallback((character: PlayerCharacter) => {
     const world = worldRef.current;
@@ -2470,6 +2537,24 @@ export function KarateGame() {
     buyAmmoPack(world);
   }, []);
 
+  const buyMaxHpControl = useCallback(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    buyMaxHpUpgrade(world);
+  }, []);
+
+  const buyPunchControl = useCallback(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    buyPowerUpgrade(world, 'PUNCH');
+  }, []);
+
+  const buyKickControl = useCallback(() => {
+    const world = worldRef.current;
+    if (!world) return;
+    buyPowerUpgrade(world, 'KICK');
+  }, []);
+
   const toggleDebug = useCallback(() => {
     const world = worldRef.current;
     if (!world) return;
@@ -2543,6 +2628,11 @@ export function KarateGame() {
           <p className="ml-2 mt-2 inline-flex rounded-full border border-emerald-300/20 bg-emerald-300/[.07] px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-emerald-200">
             ${journeyView.cash} · 飲料 ×{journeyView.energyDrinks}
           </p>
+          <p className="ml-2 mt-2 inline-flex rounded-full border border-violet-300/20 bg-violet-300/[.07] px-3 py-1 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-violet-200">
+            MAX HP {journeyView.maxHp} · 拳{' '}
+            {Math.round(journeyView.punchPower * 100)}% · 腳{' '}
+            {Math.round(journeyView.kickPower * 100)}%
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -2607,6 +2697,50 @@ export function KarateGame() {
         </div>
       </header>
 
+      <div className="game-config-panel" aria-label="闖關自訂設定">
+        <div>
+          <span>敵人數量</span>
+          <strong>{gameConfig.enemyCount} 名 + Boss</strong>
+          <input
+            type="range"
+            min="1"
+            max="30"
+            step="1"
+            value={gameConfig.enemyCount}
+            disabled={status === 'FIGHTING' || status === 'PAUSED'}
+            onChange={(event) =>
+              setGameConfig((current) => ({
+                ...current,
+                enemyCount: Number(event.target.value),
+              }))
+            }
+            aria-label="敵人數量"
+          />
+        </div>
+        <div>
+          <span>敵人強度</span>
+          <strong>{Math.round(gameConfig.enemyStrength * 100)}%</strong>
+          <input
+            type="range"
+            min="0.5"
+            max="2.5"
+            step="0.1"
+            value={gameConfig.enemyStrength}
+            disabled={status === 'FIGHTING' || status === 'PAUSED'}
+            onChange={(event) =>
+              setGameConfig((current) => ({
+                ...current,
+                enemyStrength: Number(event.target.value),
+              }))
+            }
+            aria-label="敵人強度"
+          />
+        </div>
+        <p>
+          按「開始闖關」套用設定；強度會同時影響敵人血量、攻擊力與反應速度。
+        </p>
+      </div>
+
       <div className="rival-select character-select" aria-label="選擇玩家角色">
         <button
           type="button"
@@ -2645,13 +2779,14 @@ export function KarateGame() {
           <span className="rival-tendency">拳腳完整 · 現代雙手持槍</span>
         </button>
         <div className="rival-card journey-card" aria-label="闖關規則">
-          <span className="rival-index text-rose-300">ROUTE // 11 戰</span>
+          <span className="rival-index text-rose-300">ROUTE // 自訂戰線</span>
           <strong>一路前進，最後打 Boss</strong>
           <small>
-            十名小兵逐步增強；Boss 前可繼續打小兵賺錢，準備好再挑戰。
+            {gameConfig.enemyCount} 名敵人逐步增強；Boss
+            前可繼續打小兵賺錢，準備好再挑戰。
           </small>
           <span className="rival-tendency">
-            每 5 人可進商店 · 飲料與子彈包各 $20
+            每 5 人可進商店 · 可升級血量上限、拳力與腳力
           </span>
         </div>
       </div>
@@ -2749,6 +2884,48 @@ export function KarateGame() {
                     增加 {AMMO_PACK_SIZE} 發 · 現有 {journeyView.ammo}
                   </small>
                   <b>${AMMO_PACK_COST}</b>
+                </button>
+                <button
+                  type="button"
+                  onClick={buyMaxHpControl}
+                  disabled={journeyView.cash < MAX_HP_UPGRADE_COST}
+                >
+                  <HeartPulse />
+                  <strong>體能訓練</strong>
+                  <small>
+                    血量上限 +{MAX_HP_UPGRADE_AMOUNT} · 現有 {journeyView.maxHp}
+                  </small>
+                  <b>${MAX_HP_UPGRADE_COST}</b>
+                </button>
+                <button
+                  type="button"
+                  onClick={buyPunchControl}
+                  disabled={journeyView.cash < PUNCH_UPGRADE_COST}
+                >
+                  <span className="shop-symbol" aria-hidden="true">
+                    拳
+                  </span>
+                  <strong>重拳手套</strong>
+                  <small>
+                    拳擊 +{Math.round(POWER_UPGRADE_AMOUNT * 100)}% · 現有{' '}
+                    {Math.round(journeyView.punchPower * 100)}%
+                  </small>
+                  <b>${PUNCH_UPGRADE_COST}</b>
+                </button>
+                <button
+                  type="button"
+                  onClick={buyKickControl}
+                  disabled={journeyView.cash < KICK_UPGRADE_COST}
+                >
+                  <span className="shop-symbol" aria-hidden="true">
+                    腳
+                  </span>
+                  <strong>爆發腿甲</strong>
+                  <small>
+                    腳擊 +{Math.round(POWER_UPGRADE_AMOUNT * 100)}% · 現有{' '}
+                    {Math.round(journeyView.kickPower * 100)}%
+                  </small>
+                  <b>${KICK_UPGRADE_COST}</b>
                 </button>
               </div>
               <button

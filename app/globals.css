@@ -152,6 +152,53 @@ button {
   touch-action: manipulation;
 }
 
+.game-config-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(14rem, 1fr)) minmax(18rem, 1.2fr);
+  align-items: center;
+  gap: 0.85rem;
+  border: 1px solid rgba(103, 232, 249, 0.2);
+  border-radius: 1rem;
+  background: linear-gradient(
+    110deg,
+    rgba(8, 47, 73, 0.5),
+    rgba(15, 23, 42, 0.76)
+  );
+  padding: 0.85rem 1rem;
+}
+
+.game-config-panel > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 0.75rem;
+}
+
+.game-config-panel span,
+.game-config-panel strong {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.78rem;
+}
+
+.game-config-panel span {
+  color: #94a3b8;
+}
+
+.game-config-panel strong {
+  color: #cffafe;
+}
+
+.game-config-panel input[type='range'] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: #22d3ee;
+}
+
+.game-config-panel p {
+  color: #94a3b8;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .rival-select {
   display: grid;
   grid-template-columns: repeat(3, minmax(15rem, 1fr));
@@ -462,6 +509,37 @@ button {
   width: 1.4rem;
   height: 1.4rem;
   color: #67e8f9;
+}
+
+.shop-symbol {
+  display: grid;
+  width: 1.7rem;
+  height: 1.7rem;
+  place-items: center;
+  border: 1px solid rgba(103, 232, 249, 0.35);
+  border-radius: 999px;
+  color: #67e8f9;
+  font-size: 0.7rem;
+}
+
+@media (max-width: 900px) {
+  .game-config-panel {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .game-config-panel p {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 560px) {
+  .game-config-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .game-config-panel p {
+    grid-column: auto;
+  }
 }
 
 .shop-grid button strong {
