@@ -15,18 +15,18 @@ try {
 }
 
 $sheetDefinitions = @(
-  @('fio-actions-smooth-v3.png', 24),
-  @('enemy-quick-fist-smooth-v3.png', 36),
-  @('enemy-long-kick-smooth-v3.png', 36),
-  @('enemy-grappler-smooth-v3.png', 36),
-  @('fio-hit-reactions-smooth-v3.png', 12),
-  @('fio-guards-smooth-v3.png', 12),
-  @('fio-gun-actions-smooth-v3.png', 12),
-  @('kai-gun-actions-smooth-v3.png', 12),
-  @('fio-walk-smooth-v3.png', 12),
-  @('kai-walk-smooth-v3.png', 12),
-  @('enemy-long-kick-walk-smooth-v3.png', 12),
-  @('enemy-grappler-walk-smooth-v3.png', 12)
+  @('fio-actions-smooth-v4.png', 24),
+  @('enemy-quick-fist-smooth-v4.png', 36),
+  @('enemy-long-kick-smooth-v4.png', 36),
+  @('enemy-grappler-smooth-v4.png', 36),
+  @('fio-hit-reactions-smooth-v4.png', 12),
+  @('fio-guards-smooth-v4.png', 12),
+  @('fio-gun-actions-smooth-v4.png', 12),
+  @('kai-gun-actions-smooth-v4.png', 12),
+  @('fio-walk-smooth-v4.png', 12),
+  @('kai-walk-smooth-v4.png', 12),
+  @('enemy-long-kick-walk-smooth-v4.png', 12),
+  @('enemy-grappler-walk-smooth-v4.png', 12)
 )
 
 foreach ($definition in $sheetDefinitions) {

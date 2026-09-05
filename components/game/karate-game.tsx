@@ -338,6 +338,7 @@ class Fighter {
   moveIntent = 0;
   attack: AttackRuntime | null = null;
   stunFrames = 0;
+  stunTotalFrames = 0;
 
   constructor(
     id: 'player' | 'enemy',
@@ -361,6 +362,7 @@ class Fighter {
     this.moveIntent = 0;
     this.attack = null;
     this.stunFrames = 0;
+    this.stunTotalFrames = 0;
   }
 
   get busy() {
@@ -423,6 +425,7 @@ class Fighter {
       if (this.stunFrames === 0) {
         this.state = 'IDLE';
         this.attack = null;
+        this.stunTotalFrames = 0;
       }
       return;
     }
@@ -499,6 +502,7 @@ class Fighter {
       );
       this.stamina = Math.max(0, this.stamina - data.staminaCost * 0.55);
       this.stunFrames = data.blockStunFrames;
+      this.stunTotalFrames = this.stunFrames;
       this.state = `GUARD_${data.attackLevel}`;
       this.x += direction * data.knockback * 0.25;
       return;
@@ -507,6 +511,7 @@ class Fighter {
     const multiplier = counter ? 1.5 : 1;
     this.hp = Math.max(0, this.hp - Math.round(data.damage * multiplier));
     this.stunFrames = data.hitStunFrames + (counter ? 6 : 0);
+    this.stunTotalFrames = this.stunFrames;
     this.state = `HIT_${data.attackLevel}`;
     this.attack = null;
     this.crouching = false;
@@ -950,11 +955,13 @@ function resolveGrapple(world: World) {
   loser.hp = Math.max(0, loser.hp - throwDamage);
   loser.state = 'KNOCKDOWN';
   loser.stunFrames = 54;
+  loser.stunTotalFrames = loser.stunFrames;
   loser.attack = null;
   loser.crouching = false;
   loser.x += throwDirection * 92;
   winner.state = 'THROW';
   winner.stunFrames = 22;
+  winner.stunTotalFrames = winner.stunFrames;
   world.banner = {
     text: playerWins ? 'THROW!' : 'REVERSED!',
     subtext: playerWins ? '擒拿成功' : '對手反摔',
@@ -1363,6 +1370,7 @@ function checkKO(world: World) {
   world.encounterResolved = true;
   loser.state = 'KNOCKDOWN';
   loser.stunFrames = 9999;
+  loser.stunTotalFrames = loser.stunFrames;
   world.projectiles = [];
   world.hitStop = 0;
   world.shake = 0;
@@ -1769,6 +1777,15 @@ function drawFighter(
     : 0;
   const actionPulse = attack ? Math.sin(Math.PI * attackProgress) : 0;
   const posePhase = Math.min(2, Math.floor(actionPulse * 3));
+  const stunProgress =
+    fighter.stunTotalFrames > 0
+      ? 1 - fighter.stunFrames / fighter.stunTotalFrames
+      : 0.5;
+  const stunPulse = Math.sin(Math.PI * clamp(stunProgress, 0, 1));
+  const stunPosePhase =
+    fighter.state === 'KNOCKDOWN'
+      ? 2
+      : Math.min(2, Math.floor(stunPulse * 3));
   const expandedFrame = frame * 3 + posePhase;
   const activeThrust =
     attack && attack.attackType !== 'GUN'
@@ -1803,7 +1820,7 @@ function drawFighter(
   ctx.scale(fighter.direction, 1);
   if (isHitPose && reactionFrame !== null) {
     if (isEnemy || isKai) {
-      const enemyReactionFrame = (reactionFrame + 8) * 3 + 2;
+      const enemyReactionFrame = (reactionFrame + 8) * 3 + stunPosePhase;
       drawEnemyActionFrame(
         ctx,
         combatSheet,
@@ -1815,7 +1832,7 @@ function drawFighter(
       drawActionFrame(
         ctx,
         world.playerReactionSheet,
-        reactionFrame * 3 + 2,
+        reactionFrame * 3 + stunPosePhase,
         PLAYER_REACTION_SIZE,
         0,
         1,
@@ -1824,7 +1841,7 @@ function drawFighter(
     }
   } else if (isGuardPose && guardFrame !== null) {
     if (isEnemy || isKai) {
-      const enemyGuardFrame = (guardFrame + 7) * 3 + 2;
+      const enemyGuardFrame = (guardFrame + 7) * 3 + stunPosePhase;
       drawEnemyActionFrame(
         ctx,
         combatSheet,
@@ -1836,7 +1853,7 @@ function drawFighter(
       drawActionFrame(
         ctx,
         world.playerGuardSheet,
-        guardFrame * 3 + 2,
+        guardFrame * 3 + stunPosePhase,
         PLAYER_GUARD_SIZE,
         0,
         1,
@@ -2254,18 +2271,18 @@ export function KarateGame() {
         fetch('/game-data/attacks.json'),
         fetch('/game-data/ai.json'),
         loadImage('/urban-stage-seamless.png'),
-        loadImage('/fio-actions-smooth-v3.png'),
-        loadImage('/fio-hit-reactions-smooth-v3.png'),
-        loadImage('/enemy-quick-fist-smooth-v3.png'),
-        loadImage('/enemy-long-kick-smooth-v3.png'),
-        loadImage('/enemy-grappler-smooth-v3.png'),
-        loadImage('/fio-guards-smooth-v3.png'),
-        loadImage('/fio-gun-actions-smooth-v3.png'),
-        loadImage('/kai-gun-actions-smooth-v3.png'),
-        loadImage('/fio-walk-smooth-v3.png'),
-        loadImage('/kai-walk-smooth-v3.png'),
-        loadImage('/enemy-long-kick-walk-smooth-v3.png'),
-        loadImage('/enemy-grappler-walk-smooth-v3.png'),
+        loadImage('/fio-actions-smooth-v4.png'),
+        loadImage('/fio-hit-reactions-smooth-v4.png'),
+        loadImage('/enemy-quick-fist-smooth-v4.png'),
+        loadImage('/enemy-long-kick-smooth-v4.png'),
+        loadImage('/enemy-grappler-smooth-v4.png'),
+        loadImage('/fio-guards-smooth-v4.png'),
+        loadImage('/fio-gun-actions-smooth-v4.png'),
+        loadImage('/kai-gun-actions-smooth-v4.png'),
+        loadImage('/fio-walk-smooth-v4.png'),
+        loadImage('/kai-walk-smooth-v4.png'),
+        loadImage('/enemy-long-kick-walk-smooth-v4.png'),
+        loadImage('/enemy-grappler-walk-smooth-v4.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
       const aiPayload = (await aiResponse.json()) as AIData[] | AIData;
