@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import ts from 'typescript';
+
+const source = fs.readFileSync(new URL('../components/game/karate-game.tsx', import.meta.url), 'utf8');
+const functionSource = source.match(/function attackPosePhase\(fighter: Fighter\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(functionSource, 'Production animation timing helper exists');
+const js = ts.transpile(functionSource, { target: ts.ScriptTarget.ES2022 });
+const phase = vm.runInNewContext(`${js}; attackPosePhase`);
+assert.equal(phase({ attack: null }), 0);
+for (const [startupMultiplier, recoveryMultiplier] of [[1, 1], [1.1, 1.15]]) {
+  const data = { startupFrames: 12, activeFrames: 5, recoveryFrames: 18 };
+  const startup = data.startupFrames * startupMultiplier;
+  const activeEnd = startup + data.activeFrames;
+  const total = activeEnd + data.recoveryFrames * recoveryMultiplier;
+  const sample = (frame) => phase({ attack: { data, frame, startupMultiplier, recoveryMultiplier } });
+  assert.equal(sample(0), 0);
+  assert.equal(sample(startup * 0.5), 1, 'Visible halfway pose during windup');
+  assert.equal(sample(startup), 2, 'Extended limb when hitbox becomes active');
+  assert.equal(sample(activeEnd - 0.001), 2);
+  assert.equal(sample(activeEnd), 1, 'Retract through halfway pose');
+  assert.equal(sample(total - 0.001), 0);
+  const sequence = Array.from({ length: Math.ceil(total) }, (_, frame) => sample(frame));
+  assert.deepEqual(sequence.filter((value, index) => index === 0 || value !== sequence[index - 1]), [0, 1, 2, 1, 0]);
+}
+assert.ok(!source.includes('ctx.rotate(attackRotation)'), 'No whole-body attack rotation');
+assert.ok(!source.includes('fighter.direction * activeThrust'), 'No cosmetic foot sliding');
+const updateMethod = source.match(/  update\(dt: number\) \{[\s\S]*?\n  \}/)?.[0];
+assert.ok(updateMethod);
+const updateJs = ts.transpile(`function ${updateMethod.trim()}`, { target: ts.ScriptTarget.ES2022 });
+const update = vm.runInNewContext(`${updateJs}; update`, { FPS: 60 });
+const fighter = { x: 350, direction: 1, stamina: 100, walkCycle: 0, moveIntent: 1, attack: null, stunFrames: 0, crouching: false };
+update.call(fighter, 1 / 60);
+assert.ok(fighter.walkCycle > 0, 'Walking advances local gait clock');
+const heldPhase = fighter.walkCycle;
+fighter.moveIntent = 0;
+update.call(fighter, 1 / 60);
+assert.equal(fighter.walkCycle, heldPhase, 'Idle preserves supporting leg');
+fighter.moveIntent = -1;
+update.call(fighter, 1 / 60);
+assert.ok(fighter.walkCycle < heldPhase, 'Backward movement reverses the same gait');
+fighter.stunFrames = 10;
+const hitPhase = fighter.walkCycle;
+update.call(fighter, 1 / 60);
+assert.equal(fighter.walkCycle, hitPhase, 'Stun preserves gait phase');
+console.log('Validated attack order, hit-window/fatigue timing, and per-fighter forward/backward/idle/stun gait.');

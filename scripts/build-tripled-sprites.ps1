@@ -100,15 +100,22 @@ function Draw-NormalizedFrame {
     [int]$Rows,
     [System.Drawing.Rectangle]$CellDestination,
     [double]$VisibleHeight,
-    [double]$FeetY
+    [double]$FeetY,
+    [bool]$AnchorUpperBody = $false
   )
 
   $bounds = Get-FrameBounds $Source $SourceIndex $Columns $Rows
   $scale = $VisibleHeight / $bounds.Height
   $width = [Math]::Max(1, [Math]::Round($bounds.Width * $scale))
   $height = [Math]::Max(1, [Math]::Round($bounds.Height * $scale))
+  $anchorX = $bounds.X + $bounds.Width / 2
+  if ($AnchorUpperBody) {
+    $headArea = [System.Drawing.Rectangle]::new($bounds.X, $bounds.Y, $bounds.Width, [Math]::Max(1, [Math]::Round($bounds.Height * 0.20)))
+    $headBounds = [SpriteAlphaBounds]::Find($Source, $headArea)
+    $anchorX = $headBounds.X + $headBounds.Width / 2
+  }
   $destination = [System.Drawing.Rectangle]::new(
-    $CellDestination.X + [Math]::Round(($CellDestination.Width - $width) / 2),
+    $CellDestination.X + [Math]::Round($CellDestination.Width / 2 - ($anchorX - $bounds.X) * $scale),
     [Math]::Round($FeetY - $height),
     $width,
     $height
@@ -154,7 +161,8 @@ function Build-TripledSheet {
           $widestVisibleFrame = [Math]::Max($widestVisibleFrame, $normalizedWidth)
         }
       }
-      $cellWidth = [Math]::Ceiling($widestVisibleFrame + 20)
+      # Leave room on both sides of the head/root, not the changing limb bounds.
+      $cellWidth = [Math]::Ceiling($widestVisibleFrame * 1.5 + 20)
     } else {
       $sourceNeutral = Get-FrameBounds $source 0 $Columns $Rows
       $intermediateNeutral = Get-FrameBounds $intermediate 0 $Columns $Rows
@@ -186,17 +194,21 @@ function Build-TripledSheet {
               $cellWidth,
               $cellHeight
             )
+            $graphics.SetClip($destination)
 
             if ($Mode -eq 'walk') {
               $feetY = $destination.Y + $cellHeight - 4
               if ($phase -eq 0) {
-                Draw-NormalizedFrame $graphics $source $frame $Columns $Rows $destination $targetVisibleHeight $feetY
+                Draw-NormalizedFrame $graphics $source $frame $Columns $Rows $destination $targetVisibleHeight $feetY $true
               } elseif ($phase -eq 1) {
-                Draw-NormalizedFrame $graphics $intermediate $frame $Columns $Rows $destination $targetVisibleHeight $feetY
+                Draw-NormalizedFrame $graphics $intermediate $frame $Columns $Rows $destination $targetVisibleHeight $feetY $true
               } else {
                 $nextFrame = (($frame + 1) % $Columns) + $outputRow * $Columns
-                Draw-NormalizedFrame $graphics $source $nextFrame $Columns $Rows $destination $targetVisibleHeight $feetY
+                Draw-NormalizedFrame $graphics $source $nextFrame $Columns $Rows $destination $targetVisibleHeight $feetY $true
               }
+            } elseif ($frame -eq 0 -and $InputName -notlike '*hit-reactions*') {
+              # Idle must never alternate between independently drawn faces.
+              Draw-Cell $graphics $source 0 $Columns $Rows $destination
             } elseif ($phase -eq 0) {
               Draw-Cell $graphics $source 0 $Columns $Rows $destination
             } elseif ($phase -eq 2) {
@@ -205,13 +217,24 @@ function Build-TripledSheet {
               $intermediateBounds = Get-FrameBounds $intermediate $frame $Columns $Rows
               $finalBounds = Get-FrameBounds $source $frame $Columns $Rows
               $visibleHeight = $intermediateBounds.Height * $intermediateScale
-              $feetY = $destination.Y + $finalBounds.Bottom * ($cellHeight / $sourceCellHeight)
+              $sourceCell = Get-CellRectangle $source $frame $Columns $Rows
+              # Bounds are sheet coordinates; remove the source row before
+              # adding the destination row, otherwise kicks disappear below it.
+              $feetY = $destination.Y + ($finalBounds.Bottom - $sourceCell.Y) * ($cellHeight / $sourceCellHeight)
               Draw-NormalizedFrame $graphics $intermediate $frame $Columns $Rows $destination $visibleHeight $feetY
             }
+            $graphics.ResetClip()
           }
         }
       } finally {
         $graphics.Dispose()
+      }
+      for ($index = 0; $index -lt $frameCount * 3; $index += 1) {
+        $cell = Get-CellRectangle $output $index ($Columns * 3) $Rows
+        $bounds = [SpriteAlphaBounds]::Find($output, $cell)
+        if ($bounds.IsEmpty -or $bounds.Height -lt $cellHeight * 0.1) {
+          throw "$OutputName frame $index is empty or nearly clipped away."
+        }
       }
       $output.Save(
         (Join-Path $publicPath $OutputName),

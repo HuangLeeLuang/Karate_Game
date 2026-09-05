@@ -42,9 +42,26 @@ foreach ($definition in $sheetDefinitions) {
     if ($columns * $rows -ne $expectedFrames) {
       throw "$name frame count is incorrect"
     }
+    $cellWidth = $image.Width / $columns
+    $cellHeight = $image.Height / $rows
+    for ($frame = 0; $frame -lt $expectedFrames; $frame += 1) {
+      $left = ($frame % $columns) * $cellWidth
+      $top = [Math]::Floor($frame / $columns) * $cellHeight
+      $opaqueSamples = 0
+      for ($y = 3; $y -lt $cellHeight; $y += 6) {
+        for ($x = 3; $x -lt $cellWidth; $x += 6) {
+          if ($image.GetPixel($left + $x, $top + $y).A -gt 8) {
+            $opaqueSamples += 1
+          }
+        }
+      }
+      if ($opaqueSamples -lt 20) {
+        throw "$name frame $frame is blank or mostly outside its cell"
+      }
+    }
   } finally {
     $image.Dispose()
   }
 }
 
-Write-Host 'Validated seamless stage edges and 228 animation frames.'
+Write-Host 'Validated seamless stage edges and non-empty content in all 228 animation frames.'

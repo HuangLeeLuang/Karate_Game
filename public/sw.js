@@ -1,4 +1,4 @@
-const CACHE_NAME = 'neon-karate-v11';
+const CACHE_NAME = 'neon-karate-v12';
 const APP_SHELL = [
   '/',
   '/manifest.webmanifest',
@@ -10,18 +10,18 @@ const APP_SHELL = [
   '/game-data/attacks.json',
   '/game-data/ai.json',
   '/urban-stage-seamless.png',
-  '/fio-actions-smooth-v4.png',
-  '/fio-hit-reactions-smooth-v4.png',
-  '/fio-guards-smooth-v4.png',
-  '/fio-gun-actions-smooth-v4.png',
-  '/kai-gun-actions-smooth-v4.png',
-  '/fio-walk-smooth-v4.png',
-  '/kai-walk-smooth-v4.png',
-  '/enemy-long-kick-walk-smooth-v4.png',
-  '/enemy-grappler-walk-smooth-v4.png',
-  '/enemy-quick-fist-smooth-v4.png',
-  '/enemy-long-kick-smooth-v4.png',
-  '/enemy-grappler-smooth-v4.png',
+  '/fio-actions-smooth-v4.png?pose=5',
+  '/fio-hit-reactions-smooth-v4.png?pose=5',
+  '/fio-guards-smooth-v4.png?pose=5',
+  '/fio-gun-actions-smooth-v4.png?pose=5',
+  '/kai-gun-actions-smooth-v4.png?pose=5',
+  '/fio-walk-smooth-v4.png?pose=5',
+  '/kai-walk-smooth-v4.png?pose=5',
+  '/enemy-long-kick-walk-smooth-v4.png?pose=5',
+  '/enemy-grappler-walk-smooth-v4.png?pose=5',
+  '/enemy-quick-fist-smooth-v4.png?pose=5',
+  '/enemy-long-kick-smooth-v4.png?pose=5',
+  '/enemy-grappler-smooth-v4.png?pose=5',
 ];
 
 self.addEventListener('install', (event) => {

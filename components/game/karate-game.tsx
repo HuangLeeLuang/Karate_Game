@@ -336,6 +336,7 @@ class Fighter {
   state = 'IDLE';
   crouching = false;
   moveIntent = 0;
+  walkCycle = 0;
   attack: AttackRuntime | null = null;
   stunFrames = 0;
   stunTotalFrames = 0;
@@ -360,6 +361,7 @@ class Fighter {
     this.state = 'IDLE';
     this.crouching = false;
     this.moveIntent = 0;
+    this.walkCycle = 0;
     this.attack = null;
     this.stunFrames = 0;
     this.stunTotalFrames = 0;
@@ -442,6 +444,11 @@ class Fighter {
     const exhausted = this.stamina < 20;
     const speed = this.moveIntent > 0 ? 180 : 155;
     if (!this.crouching && this.moveIntent !== 0) {
+      // Advance only while this fighter moves; pauses and hit-stop keep the
+      // same supporting leg, and reversing direction retraces the same cycle.
+      this.walkCycle = (
+        this.walkCycle + this.moveIntent * this.direction * speed * (exhausted ? 0.9 : 1) * dt / 120 + 1
+      ) % 1;
       this.x += this.moveIntent * speed * (exhausted ? 0.9 : 1) * dt;
       this.state =
         this.moveIntent === this.direction ? 'MOVE_FORWARD' : 'MOVE_BACKWARD';
@@ -1587,20 +1594,27 @@ function actionFrameFor(fighter: Fighter) {
   if (fighter.state === 'THROW') return 2;
   if (!fighter.attack) return 0;
 
-  const { data, frame } = fighter.attack;
+  const { data } = fighter.attack;
   if (data.attackType === 'GUN') return 0;
   const actionFrame =
     data.attackType === 'PUNCH'
       ? { HIGH: 1, MID: 2, LOW: 3 }[data.attackLevel]
       : { HIGH: 4, MID: 5, LOW: 6 }[data.attackLevel];
-  const activeEnd = data.startupFrames + data.activeFrames;
-  const total = activeEnd + data.recoveryFrames;
-  if (
-    frame < data.startupFrames * 0.42 ||
-    frame > total - data.recoveryFrames * 0.36
-  )
-    return 0;
   return actionFrame;
+}
+
+// Match the visual contact pose to the actual hit window, including fatigue.
+function attackPosePhase(fighter: Fighter) {
+  if (!fighter.attack) return 0;
+  const { data, frame, startupMultiplier, recoveryMultiplier } = fighter.attack;
+  const startup = data.startupFrames * startupMultiplier;
+  const activeEnd = startup + data.activeFrames;
+  const recovery = data.recoveryFrames * recoveryMultiplier;
+  if (frame < startup * 0.25) return 0;
+  if (frame < startup) return 1;
+  if (frame < activeEnd) return 2;
+  if (frame < activeEnd + recovery * 0.7) return 1;
+  return 0;
 }
 
 function reactionFrameFor(fighter: Fighter) {
@@ -1676,14 +1690,7 @@ function drawEnemyActionFrame(
 
 function gunFrameFor(fighter: Fighter) {
   if (!fighter.attack || fighter.attack.data.attackType !== 'GUN') return 0;
-  const { data, frame } = fighter.attack;
-  const activeEnd = data.startupFrames + data.activeFrames;
-  const total = activeEnd + data.recoveryFrames;
-  if (
-    frame < data.startupFrames * 0.38 ||
-    frame > total - data.recoveryFrames * 0.32
-  )
-    return 0;
+  const { data } = fighter.attack;
   return { HIGH: 1, MID: 2, LOW: 3 }[data.attackLevel];
 }
 
@@ -1769,34 +1776,17 @@ function drawFighter(
     : isKai
       ? world.maleActionSheet
       : world.actionSheet;
-  const attackTotal = attack
-    ? attack.startupFrames + attack.activeFrames + attack.recoveryFrames
-    : 1;
-  const attackProgress = fighter.attack
-    ? clamp(fighter.attack.frame / attackTotal, 0, 1)
-    : 0;
-  const actionPulse = attack ? Math.sin(Math.PI * attackProgress) : 0;
-  const posePhase = Math.min(2, Math.floor(actionPulse * 3));
+  const posePhase = attackPosePhase(fighter);
   const stunProgress =
     fighter.stunTotalFrames > 0
       ? 1 - fighter.stunFrames / fighter.stunTotalFrames
       : 0.5;
-  const stunPulse = Math.sin(Math.PI * clamp(stunProgress, 0, 1));
+  // A hit begins at impact, not at the neutral stance. Recover only afterward.
   const stunPosePhase =
-    fighter.state === 'KNOCKDOWN'
+    fighter.state === 'KNOCKDOWN' || stunProgress < 0.4
       ? 2
-      : Math.min(2, Math.floor(stunPulse * 3));
+      : 1;
   const expandedFrame = frame * 3 + posePhase;
-  const activeThrust =
-    attack && attack.attackType !== 'GUN'
-      ? actionPulse * (attack.attackType === 'KICK' ? 42 : 28)
-      : 0;
-  const attackRotation =
-    attack && attack.attackType !== 'GUN'
-      ? fighter.direction *
-        actionPulse *
-        (attack.attackType === 'KICK' ? -0.055 : -0.025)
-      : 0;
   const spriteIndex = isEnemy ? world.aiIndex : 0;
   const enemyActionSize =
     ENEMY_ACTION_SIZES[spriteIndex] ?? ENEMY_ACTION_SIZES[0];
@@ -1804,7 +1794,7 @@ function drawFighter(
     ENEMY_FRAME_RECTS[spriteIndex] ?? ENEMY_FRAME_RECTS[0];
   const actionSize = isEnemy || isKai ? enemyActionSize : PLAYER_ACTION_SIZE;
   const actionGroundOffset =
-    PLAYER_ACTION_GROUND_OFFSETS[frame] ?? PLAYER_ACTION_GROUND_OFFSETS[0];
+    PLAYER_ACTION_GROUND_OFFSETS[posePhase === 0 ? 0 : frame] ?? PLAYER_ACTION_GROUND_OFFSETS[0];
 
   ctx.save();
   ctx.globalAlpha = 0.38;
@@ -1815,8 +1805,8 @@ function drawFighter(
   ctx.restore();
 
   ctx.save();
-  ctx.translate(fighter.x + fighter.direction * activeThrust, baseY);
-  ctx.rotate(attackRotation);
+  // The poses already contain limb extension; keep the supporting foot planted.
+  ctx.translate(fighter.x, baseY);
   ctx.scale(fighter.direction, 1);
   if (isHitPose && reactionFrame !== null) {
     if (isEnemy || isKai) {
@@ -1880,7 +1870,11 @@ function drawFighter(
         PLAYER_GUARD_GROUND_OFFSETS[3],
       );
   } else if (isWalking) {
-    const walkFrame = Math.floor(world.animationTime * 24) % 12;
+    // Each triplet ends with the following triplet's first pose. Skip those
+    // duplicated endpoints so foot exchange has an even cadence, including wrap.
+    const walkSequence = [0, 1, 3, 4, 6, 7, 9, 10];
+    const walkStep = Math.floor(fighter.walkCycle * walkSequence.length);
+    const walkFrame = walkSequence[walkStep];
     const walkSheet = isEnemy
       ? world.enemyWalkSheets[world.aiIndex]
       : world.walkSheets[world.playerCharacter];
@@ -2271,18 +2265,18 @@ export function KarateGame() {
         fetch('/game-data/attacks.json'),
         fetch('/game-data/ai.json'),
         loadImage('/urban-stage-seamless.png'),
-        loadImage('/fio-actions-smooth-v4.png'),
-        loadImage('/fio-hit-reactions-smooth-v4.png'),
-        loadImage('/enemy-quick-fist-smooth-v4.png'),
-        loadImage('/enemy-long-kick-smooth-v4.png'),
-        loadImage('/enemy-grappler-smooth-v4.png'),
-        loadImage('/fio-guards-smooth-v4.png'),
-        loadImage('/fio-gun-actions-smooth-v4.png'),
-        loadImage('/kai-gun-actions-smooth-v4.png'),
-        loadImage('/fio-walk-smooth-v4.png'),
-        loadImage('/kai-walk-smooth-v4.png'),
-        loadImage('/enemy-long-kick-walk-smooth-v4.png'),
-        loadImage('/enemy-grappler-walk-smooth-v4.png'),
+        loadImage('/fio-actions-smooth-v4.png?pose=5'),
+        loadImage('/fio-hit-reactions-smooth-v4.png?pose=5'),
+        loadImage('/enemy-quick-fist-smooth-v4.png?pose=5'),
+        loadImage('/enemy-long-kick-smooth-v4.png?pose=5'),
+        loadImage('/enemy-grappler-smooth-v4.png?pose=5'),
+        loadImage('/fio-guards-smooth-v4.png?pose=5'),
+        loadImage('/fio-gun-actions-smooth-v4.png?pose=5'),
+        loadImage('/kai-gun-actions-smooth-v4.png?pose=5'),
+        loadImage('/fio-walk-smooth-v4.png?pose=5'),
+        loadImage('/kai-walk-smooth-v4.png?pose=5'),
+        loadImage('/enemy-long-kick-walk-smooth-v4.png?pose=5'),
+        loadImage('/enemy-grappler-walk-smooth-v4.png?pose=5'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
       const aiPayload = (await aiResponse.json()) as AIData[] | AIData;
