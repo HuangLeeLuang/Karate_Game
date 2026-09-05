@@ -87,17 +87,27 @@ function Build-TripledSheet {
 
             if ($Mode -eq 'walk') {
               $nextFrame = (($frame + 1) % $Columns) + $outputRow * $Columns
-              $nextWeight = $phase / 3
-              Draw-Cell $graphics $source $frame $Columns $Rows $destination (1 - $nextWeight)
-              if ($nextWeight -gt 0) {
-                Draw-Cell $graphics $source $nextFrame $Columns $Rows $destination $nextWeight
+              if ($phase -eq 0) {
+                Draw-Cell $graphics $source $frame $Columns $Rows $destination 1
+              } elseif ($phase -eq 1) {
+                Draw-Cell $graphics $source $frame $Columns $Rows $destination 1
+                Draw-Cell $graphics $source $nextFrame $Columns $Rows $destination 0.33
+              } else {
+                Draw-Cell $graphics $source $nextFrame $Columns $Rows $destination 1
+                Draw-Cell $graphics $source $frame $Columns $Rows $destination 0.33
               }
             } elseif ($frame -eq 0) {
               Draw-Cell $graphics $source 0 $Columns $Rows $destination 1
             } else {
-              $targetWeight = ($phase + 1) / 3
-              Draw-Cell $graphics $source 0 $Columns $Rows $destination (1 - $targetWeight)
-              Draw-Cell $graphics $source $frame $Columns $Rows $destination $targetWeight
+              if ($phase -eq 0) {
+                Draw-Cell $graphics $source 0 $Columns $Rows $destination 1
+                Draw-Cell $graphics $source $frame $Columns $Rows $destination 0.33
+              } elseif ($phase -eq 1) {
+                Draw-Cell $graphics $source $frame $Columns $Rows $destination 1
+                Draw-Cell $graphics $source 0 $Columns $Rows $destination 0.33
+              } else {
+                Draw-Cell $graphics $source $frame $Columns $Rows $destination 1
+              }
             }
           }
         }
@@ -117,18 +127,18 @@ function Build-TripledSheet {
 }
 
 $sheets = @(
-  @('fio-actions-v3.png', 'fio-actions-smooth.png', 4, 2, 'pose'),
-  @('enemy-quick-fist-v3.png', 'enemy-quick-fist-smooth.png', 4, 3, 'pose'),
-  @('enemy-long-kick-v3.png', 'enemy-long-kick-smooth.png', 4, 3, 'pose'),
-  @('enemy-grappler-v3.png', 'enemy-grappler-smooth.png', 4, 3, 'pose'),
-  @('fio-hit-reactions-v3.png', 'fio-hit-reactions-smooth.png', 4, 1, 'pose'),
-  @('fio-guards-v2.png', 'fio-guards-smooth.png', 4, 1, 'pose'),
-  @('fio-gun-actions-v6.png', 'fio-gun-actions-smooth.png', 4, 1, 'pose'),
-  @('kai-gun-actions-v2.png', 'kai-gun-actions-smooth.png', 4, 1, 'pose'),
-  @('fio-walk-v3.png', 'fio-walk-smooth.png', 4, 1, 'walk'),
-  @('kai-walk-v2.png', 'kai-walk-smooth.png', 4, 1, 'walk'),
-  @('enemy-long-kick-walk-v1.png', 'enemy-long-kick-walk-smooth.png', 4, 1, 'walk'),
-  @('enemy-grappler-walk-v1.png', 'enemy-grappler-walk-smooth.png', 4, 1, 'walk')
+  @('fio-actions-v3.png', 'fio-actions-smooth-v2.png', 4, 2, 'pose'),
+  @('enemy-quick-fist-v3.png', 'enemy-quick-fist-smooth-v2.png', 4, 3, 'pose'),
+  @('enemy-long-kick-v3.png', 'enemy-long-kick-smooth-v2.png', 4, 3, 'pose'),
+  @('enemy-grappler-v3.png', 'enemy-grappler-smooth-v2.png', 4, 3, 'pose'),
+  @('fio-hit-reactions-v3.png', 'fio-hit-reactions-smooth-v2.png', 4, 1, 'pose'),
+  @('fio-guards-v2.png', 'fio-guards-smooth-v2.png', 4, 1, 'pose'),
+  @('fio-gun-actions-v6.png', 'fio-gun-actions-smooth-v2.png', 4, 1, 'pose'),
+  @('kai-gun-actions-v2.png', 'kai-gun-actions-smooth-v2.png', 4, 1, 'pose'),
+  @('fio-walk-v3.png', 'fio-walk-smooth-v2.png', 4, 1, 'walk'),
+  @('kai-walk-v2.png', 'kai-walk-smooth-v2.png', 4, 1, 'walk'),
+  @('enemy-long-kick-walk-v1.png', 'enemy-long-kick-walk-smooth-v2.png', 4, 1, 'walk'),
+  @('enemy-grappler-walk-v1.png', 'enemy-grappler-walk-smooth-v2.png', 4, 1, 'walk')
 )
 
 foreach ($sheet in $sheets) {

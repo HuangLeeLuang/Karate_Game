@@ -15,18 +15,18 @@ try {
 }
 
 $sheetDefinitions = @(
-  @('fio-actions-smooth.png', 24),
-  @('enemy-quick-fist-smooth.png', 36),
-  @('enemy-long-kick-smooth.png', 36),
-  @('enemy-grappler-smooth.png', 36),
-  @('fio-hit-reactions-smooth.png', 12),
-  @('fio-guards-smooth.png', 12),
-  @('fio-gun-actions-smooth.png', 12),
-  @('kai-gun-actions-smooth.png', 12),
-  @('fio-walk-smooth.png', 12),
-  @('kai-walk-smooth.png', 12),
-  @('enemy-long-kick-walk-smooth.png', 12),
-  @('enemy-grappler-walk-smooth.png', 12)
+  @('fio-actions-smooth-v2.png', 24),
+  @('enemy-quick-fist-smooth-v2.png', 36),
+  @('enemy-long-kick-smooth-v2.png', 36),
+  @('enemy-grappler-smooth-v2.png', 36),
+  @('fio-hit-reactions-smooth-v2.png', 12),
+  @('fio-guards-smooth-v2.png', 12),
+  @('fio-gun-actions-smooth-v2.png', 12),
+  @('kai-gun-actions-smooth-v2.png', 12),
+  @('fio-walk-smooth-v2.png', 12),
+  @('kai-walk-smooth-v2.png', 12),
+  @('enemy-long-kick-walk-smooth-v2.png', 12),
+  @('enemy-grappler-walk-smooth-v2.png', 12)
 )
 
 foreach ($definition in $sheetDefinitions) {
