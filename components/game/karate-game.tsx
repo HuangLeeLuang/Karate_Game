@@ -1863,7 +1863,7 @@ function drawFighter(
         PLAYER_GUARD_GROUND_OFFSETS[3],
       );
   } else if (isWalking) {
-    const walkFrame = Math.floor(world.animationTime * 18) % 12;
+    const walkFrame = Math.floor(world.animationTime * 24) % 12;
     const walkSheet = isEnemy
       ? world.enemyWalkSheets[world.aiIndex]
       : world.walkSheets[world.playerCharacter];
@@ -2254,18 +2254,18 @@ export function KarateGame() {
         fetch('/game-data/attacks.json'),
         fetch('/game-data/ai.json'),
         loadImage('/urban-stage-seamless.png'),
-        loadImage('/fio-actions-smooth-v2.png'),
-        loadImage('/fio-hit-reactions-smooth-v2.png'),
-        loadImage('/enemy-quick-fist-smooth-v2.png'),
-        loadImage('/enemy-long-kick-smooth-v2.png'),
-        loadImage('/enemy-grappler-smooth-v2.png'),
-        loadImage('/fio-guards-smooth-v2.png'),
-        loadImage('/fio-gun-actions-smooth-v2.png'),
-        loadImage('/kai-gun-actions-smooth-v2.png'),
-        loadImage('/fio-walk-smooth-v2.png'),
-        loadImage('/kai-walk-smooth-v2.png'),
-        loadImage('/enemy-long-kick-walk-smooth-v2.png'),
-        loadImage('/enemy-grappler-walk-smooth-v2.png'),
+        loadImage('/fio-actions-smooth-v3.png'),
+        loadImage('/fio-hit-reactions-smooth-v3.png'),
+        loadImage('/enemy-quick-fist-smooth-v3.png'),
+        loadImage('/enemy-long-kick-smooth-v3.png'),
+        loadImage('/enemy-grappler-smooth-v3.png'),
+        loadImage('/fio-guards-smooth-v3.png'),
+        loadImage('/fio-gun-actions-smooth-v3.png'),
+        loadImage('/kai-gun-actions-smooth-v3.png'),
+        loadImage('/fio-walk-smooth-v3.png'),
+        loadImage('/kai-walk-smooth-v3.png'),
+        loadImage('/enemy-long-kick-walk-smooth-v3.png'),
+        loadImage('/enemy-grappler-walk-smooth-v3.png'),
       ]);
       const attacks = (await attacksResponse.json()) as AttackData[];
       const aiPayload = (await aiResponse.json()) as AIData[] | AIData;
